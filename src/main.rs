@@ -80,7 +80,7 @@ fn main() {
     let log_watcher = LogWatcher::new(Arc::clone(&ban_manager), Arc::clone(&glog), config.clone());
 
     // ── 启动 auth.log 监听线程 ────────────────────────────────────────────────
-    let watcher_handle = {
+    let _watcher_handle = {
         let mut watcher = log_watcher;
         thread::spawn(move || {
             watcher.run();

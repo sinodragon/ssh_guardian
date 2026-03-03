@@ -48,6 +48,7 @@ impl IpRecord {
     }
 
     /// 剩余封禁秒数（已解禁或永久封禁时返回 None）
+    #[allow(dead_code)]
     pub fn remaining_secs(&self) -> Option<i64> {
         if self.permanent { return None; }
         if let Some(until) = self.ban_until {

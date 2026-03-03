@@ -1,7 +1,7 @@
 [package]
 name = "ssh_guardian"
-version = "1.0.1"
-edition = "2021"
+version = "1.0.2"
+edition = "2024"
 authors = ["flying4x"]
 description = "SSH brute-force protection daemon with UFW integration"
 
@@ -24,6 +24,9 @@ chrono = { version = "0.4", features = ["serde"] }
 # 正则表达式
 regex = "1"
 
+[target.'cfg(unix)'.dependencies]
+# 与系统交互
+libc = "0.2"
 # 守护进程 / 信号处理
 nix = { version = "0.27", features = ["signal", "process"] }
 

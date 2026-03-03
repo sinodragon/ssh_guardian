@@ -1,0 +1,13 @@
+/var/log/ssh_guardian.log {
+    weekly
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    dateext
+    dateformat -%Y-%m-%d
+    postrotate
+        systemctl kill -s HUP ssh_guardian.service
+    endscript
+}

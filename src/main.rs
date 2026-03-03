@@ -31,12 +31,23 @@ extern "C" fn handle_signal(_: libc::c_int) {
     }
 }
 
+#[cfg(unix)]
+static mut RELOAD_LOG: bool = false;
+
+#[cfg(unix)]
+extern "C" fn handle_sighup(_: libc::c_int) {
+    unsafe {
+        RELOAD_LOG = true;
+    }
+}
+
 fn main() {
     // ── 注册信号处理 ──────────────────────────────────────────────────────────
     #[cfg(unix)]
     unsafe {
         signal::signal(Signal::SIGTERM, SigHandler::Handler(handle_signal)).ok();
         signal::signal(Signal::SIGINT, SigHandler::Handler(handle_signal)).ok();
+        signal::signal(Signal::SIGHUP, SigHandler::Handler(handle_sighup)).ok();
     }
 
     // ── 加载配置 ──────────────────────────────────────────────────────────────
@@ -92,10 +103,24 @@ fn main() {
         .unwrap()
         .info("主循环启动，每60秒检查一次到期封禁");
 
-    #[cfg(unix)]
     loop {
+        #[cfg(unix)]
         if unsafe { !RUNNING } {
             break;
+        }
+
+        #[cfg(unix)]
+        if unsafe { RELOAD_LOG } {
+            unsafe {
+                RELOAD_LOG = false;
+            }
+            match GuardianLogger::new(&config.log_file) {
+                Ok(new_logger) => {
+                    *glog.lock().unwrap() = new_logger;
+                    glog.lock().unwrap().info("收到 SIGHUP，日志文件已重新打开");
+                }
+                Err(e) => eprintln!("重新打开日志文件失败: {}", e),
+            }
         }
 
         // 到期解禁检查

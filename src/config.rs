@@ -1,7 +1,7 @@
 // config.rs — 配置管理
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -15,6 +15,8 @@ pub struct Config {
     pub ban_duration_secs: u64,
     /// 累计封禁达到此次数后永久封禁
     pub max_ban_count: u32,
+    /// SSH 监听端口（用于日志分析时过滤）
+    pub ssh_port: u16,
     /// 状态数据库文件路径
     pub state_file: String,
     /// 日志文件路径
@@ -26,17 +28,15 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            auth_log:          "/var/log/auth.log".to_string(),
-            fail_threshold:    5,
-            time_window_secs:  600,   // 10 分钟
-            ban_duration_secs: 3600,  // 1 小时
-            max_ban_count:     3,
-            state_file:        "/var/lib/ssh_guardian/state.json".to_string(),
-            log_file:          "/var/log/ssh_guardian.log".to_string(),
-            whitelist:         vec![
-                "127.0.0.1".to_string(),
-                "::1".to_string(),
-            ],
+            auth_log: "/var/log/auth.log".to_string(),
+            fail_threshold: 5,
+            time_window_secs: 600,   // 10 分钟
+            ban_duration_secs: 3600, // 1 小时
+            max_ban_count: 3,
+            ssh_port: 22,
+            state_file: "/var/lib/ssh_guardian/state.json".to_string(),
+            log_file: "/var/log/ssh_guardian.log".to_string(),
+            whitelist: vec!["127.0.0.1".to_string(), "::1".to_string()],
         }
     }
 }
@@ -47,12 +47,10 @@ impl Config {
     pub fn load() -> Self {
         if Path::new(Self::CONFIG_PATH).exists() {
             match fs::read_to_string(Self::CONFIG_PATH) {
-                Ok(content) => {
-                    match serde_json::from_str(&content) {
-                        Ok(cfg) => return cfg,
-                        Err(e) => eprintln!("配置文件解析失败，使用默认配置: {}", e),
-                    }
-                }
+                Ok(content) => match serde_json::from_str(&content) {
+                    Ok(cfg) => return cfg,
+                    Err(e) => eprintln!("配置文件解析失败，使用默认配置: {}", e),
+                },
                 Err(e) => eprintln!("配置文件读取失败，使用默认配置: {}", e),
             }
         }

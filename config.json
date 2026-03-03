@@ -4,6 +4,7 @@
   "time_window_secs": 600,
   "ban_duration_secs": 3600,
   "max_ban_count": 5,
+  "ssh_port": 65222,
   "state_file": "/var/lib/ssh_guardian/state.json",
   "log_file": "/var/log/ssh_guardian.log",
   "whitelist": [

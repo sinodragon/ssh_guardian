@@ -1,6 +1,6 @@
 [package]
 name = "ssh_guardian"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 authors = ["flying4x"]
 description = "SSH brute-force protection daemon with UFW integration"

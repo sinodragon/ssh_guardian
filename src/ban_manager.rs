@@ -1,25 +1,29 @@
 // ban_manager.rs — UFW 封禁 / 解禁管理
+use chrono::Utc;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use chrono::Utc;
 
 use crate::config::Config;
-use crate::state::{StateDb, IpRecord};
 use crate::logger::GuardianLogger;
+use crate::state::{IpRecord, StateDb};
 
 pub struct BanManager {
-    state_db:  Arc<Mutex<StateDb>>,
-    logger:    Arc<Mutex<GuardianLogger>>,
-    config:    Config,
+    state_db: Arc<Mutex<StateDb>>,
+    logger: Arc<Mutex<GuardianLogger>>,
+    config: Config,
 }
 
 impl BanManager {
     pub fn new(
         state_db: Arc<Mutex<StateDb>>,
-        logger:   Arc<Mutex<GuardianLogger>>,
-        config:   Config,
+        logger: Arc<Mutex<GuardianLogger>>,
+        config: Config,
     ) -> Self {
-        BanManager { state_db, logger, config }
+        BanManager {
+            state_db,
+            logger,
+            config,
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -56,7 +60,10 @@ impl BanManager {
         // 5. 判断是否已在封禁中
         let already_banned = {
             let db = self.state_db.lock().unwrap();
-            db.records.get(ip).map(|r| r.is_currently_banned()).unwrap_or(false)
+            db.records
+                .get(ip)
+                .map(|r| r.is_currently_banned())
+                .unwrap_or(false)
         };
 
         if already_banned {
@@ -120,25 +127,39 @@ impl BanManager {
     // ─────────────────────────────────────────────────────────────────────────
     // 内部：调用 UFW 封禁并更新状态
     // ─────────────────────────────────────────────────────────────────────────
-    fn do_ban(&mut self, ip: &str, ban_count: u32, duration_secs: u64, permanent: bool, fail_count: u32) {
+    fn do_ban(
+        &mut self,
+        ip: &str,
+        ban_count: u32,
+        duration_secs: u64,
+        permanent: bool,
+        fail_count: u32,
+    ) {
         // 先检查是否已有 UFW 规则（避免重复）
         if self.ufw_rule_exists(ip) {
-            self.logger.lock().unwrap().warn(&format!(
-                "IP={} UFW 规则已存在，跳过重复添加", ip
-            ));
+            self.logger
+                .lock()
+                .unwrap()
+                .warn(&format!("IP={} UFW 规则已存在，跳过重复添加", ip));
         } else {
             match self.ufw_deny(ip) {
                 Ok(_) => {
                     if permanent {
                         self.logger.lock().unwrap().perm_ban(ip, ban_count);
                     } else {
-                        self.logger.lock().unwrap().ban(ip, Some(duration_secs), ban_count, fail_count);
+                        self.logger.lock().unwrap().ban(
+                            ip,
+                            Some(duration_secs),
+                            ban_count,
+                            fail_count,
+                        );
                     }
                 }
                 Err(e) => {
-                    self.logger.lock().unwrap().error(&format!(
-                        "UFW 封禁 IP={} 失败: {}", ip, e
-                    ));
+                    self.logger
+                        .lock()
+                        .unwrap()
+                        .error(&format!("UFW 封禁 IP={} 失败: {}", ip, e));
                     return;
                 }
             }
@@ -153,10 +174,10 @@ impl BanManager {
 
         let mut db = self.state_db.lock().unwrap();
         let record = db.get_or_create(ip);
-        record.ban_count       = ban_count;
-        record.ban_until       = ban_until;
-        record.permanent       = permanent;
-        record.last_banned     = Some(Utc::now());
+        record.ban_count = ban_count;
+        record.ban_until = ban_until;
+        record.permanent = permanent;
+        record.last_banned = Some(Utc::now());
         record.last_fail_count = fail_count;
     }
 
@@ -170,7 +191,8 @@ impl BanManager {
             }
             Err(e) => {
                 self.logger.lock().unwrap().warn(&format!(
-                    "UFW 删除规则 IP={} 失败（可能已不存在）: {}", ip, e
+                    "UFW 删除规则 IP={} 失败（可能已不存在）: {}",
+                    ip, e
                 ));
             }
         }
@@ -188,8 +210,21 @@ impl BanManager {
     // ─────────────────────────────────────────────────────────────────────────
     fn ufw_deny(&self, ip: &str) -> Result<(), String> {
         let output = Command::new("ufw")
-            .args(["insert", "1", "deny", "from", ip, "to", "any",
-                   "comment", "ssh_guardian"])
+            .args([
+                "insert",
+                "1",
+                "deny",
+                "proto",
+                "tcp",
+                "from",
+                ip,
+                "to",
+                "any",
+                "port",
+                &self.config.ssh_port.to_string(),
+                "comment",
+                "ssh_guardian",
+            ])
             .output()
             .map_err(|e| format!("执行 ufw 失败: {}", e))?;
 
@@ -205,7 +240,18 @@ impl BanManager {
         // ufw 删除规则：先查询编号，再按编号删除（避免交互确认问题）
         // 或直接使用 "ufw delete deny from <ip>"
         let output = Command::new("ufw")
-            .args(["delete", "deny", "from", ip, "to", "any"])
+            .args([
+                "delete",
+                "deny",
+                "proto",
+                "tcp",
+                "from",
+                ip,
+                "to",
+                "any",
+                "port",
+                &self.config.ssh_port.to_string(),
+            ])
             .output()
             .map_err(|e| format!("执行 ufw 失败: {}", e))?;
 
@@ -223,14 +269,14 @@ impl BanManager {
     }
 
     fn ufw_rule_exists(&self, ip: &str) -> bool {
-        let output = Command::new("ufw")
-            .args(["status"])
-            .output();
+        let output = Command::new("ufw").args(["status"]).output();
 
         match output {
             Ok(o) => {
                 let stdout = String::from_utf8_lossy(&o.stdout);
                 stdout.contains(ip)
+                    && stdout.contains(&self.config.ssh_port.to_string())
+                    && stdout.contains("DENY")
             }
             Err(_) => false,
         }

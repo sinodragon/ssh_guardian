@@ -1,0 +1,32 @@
+[package]
+name = "ssh_guardian"
+version = "1.0.0"
+edition = "2021"
+authors = ["flying4x"]
+description = "SSH brute-force protection daemon with UFW integration"
+
+[[bin]]
+name = "ssh_guardian"
+path = "src/main.rs"
+
+[dependencies]
+# 日志
+log = "0.4"
+env_logger = "0.10"
+
+# 序列化 / 持久化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 时间
+chrono = { version = "0.4", features = ["serde"] }
+
+# 正则表达式
+regex = "1"
+
+# 守护进程 / 信号处理
+nix = { version = "0.27", features = ["signal", "process"] }
+
+[profile.release]
+opt-level = 3
+strip = true

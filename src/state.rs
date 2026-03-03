@@ -1,0 +1,143 @@
+// state.rs — 持久化状态数据库
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
+use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc};
+
+/// 单个 IP 的封禁记录
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct IpRecord {
+    pub ip: String,
+    /// 累计封禁次数
+    pub ban_count: u32,
+    /// 当前封禁到期时间；None 表示当前未被封禁（或永久封禁）
+    pub ban_until: Option<DateTime<Utc>>,
+    /// 是否永久封禁
+    pub permanent: bool,
+    /// 首次检测时间
+    pub first_seen: DateTime<Utc>,
+    /// 最近一次封禁时间
+    pub last_banned: Option<DateTime<Utc>>,
+    /// 最近一次触发封禁时统计到的失败次数
+    pub last_fail_count: u32,
+}
+
+impl IpRecord {
+    pub fn new(ip: &str) -> Self {
+        IpRecord {
+            ip:              ip.to_string(),
+            ban_count:       0,
+            ban_until:       None,
+            permanent:       false,
+            first_seen:      Utc::now(),
+            last_banned:     None,
+            last_fail_count: 0,
+        }
+    }
+
+    /// 判断当前是否处于封禁状态
+    pub fn is_currently_banned(&self) -> bool {
+        if self.permanent {
+            return true;
+        }
+        if let Some(until) = self.ban_until {
+            return Utc::now() < until;
+        }
+        false
+    }
+
+    /// 剩余封禁秒数（已解禁或永久封禁时返回 None）
+    pub fn remaining_secs(&self) -> Option<i64> {
+        if self.permanent { return None; }
+        if let Some(until) = self.ban_until {
+            let remaining = (until - Utc::now()).num_seconds();
+            if remaining > 0 { return Some(remaining); }
+        }
+        None
+    }
+}
+
+/// 失败登录事件（用于时间窗口统计）
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FailEvent {
+    pub time: DateTime<Utc>,
+    pub user: String,
+    pub port: Option<u16>,
+}
+
+/// 完整状态数据库
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct StateDb {
+    /// IP -> 封禁记录
+    pub records: HashMap<String, IpRecord>,
+    /// IP -> 最近失败事件列表（用于时间窗口统计）
+    pub fail_events: HashMap<String, Vec<FailEvent>>,
+}
+
+impl StateDb {
+    pub fn new() -> Self {
+        StateDb::default()
+    }
+
+    pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let content = fs::read_to_string(path)?;
+        let db: StateDb = serde_json::from_str(&content)?;
+        Ok(db)
+    }
+
+    pub fn save(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(parent) = Path::new(path).parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let content = serde_json::to_string_pretty(self)?;
+        // 原子写入：先写临时文件再 rename
+        let tmp = format!("{}.tmp", path);
+        fs::write(&tmp, &content)?;
+        fs::rename(&tmp, path)?;
+        Ok(())
+    }
+
+    /// 获取或创建 IP 记录
+    pub fn get_or_create(&mut self, ip: &str) -> &mut IpRecord {
+        self.records
+            .entry(ip.to_string())
+            .or_insert_with(|| IpRecord::new(ip))
+    }
+
+    /// 添加失败事件
+    pub fn add_fail_event(&mut self, ip: &str, user: &str, port: Option<u16>) {
+        let events = self.fail_events
+            .entry(ip.to_string())
+            .or_insert_with(Vec::new);
+        events.push(FailEvent {
+            time: Utc::now(),
+            user: user.to_string(),
+            port,
+        });
+    }
+
+    /// 获取时间窗口内的失败次数，并清理过期事件
+    pub fn fail_count_in_window(&mut self, ip: &str, window_secs: u64) -> u32 {
+        let cutoff = Utc::now() - chrono::Duration::seconds(window_secs as i64);
+        let events = self.fail_events
+            .entry(ip.to_string())
+            .or_insert_with(Vec::new);
+        // 清理过期事件
+        events.retain(|e| e.time > cutoff);
+        events.len() as u32
+    }
+
+    /// 清理某IP的失败事件（封禁后重置）
+    pub fn clear_fail_events(&mut self, ip: &str) {
+        self.fail_events.remove(ip);
+    }
+
+    /// 获取所有当前临时封禁中的记录（用于到期检查）
+    pub fn active_temp_bans(&self) -> Vec<IpRecord> {
+        self.records.values()
+            .filter(|r| !r.permanent && r.ban_until.is_some() && r.is_currently_banned())
+            .cloned()
+            .collect()
+    }
+}

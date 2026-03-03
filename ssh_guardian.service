@@ -1,0 +1,29 @@
+[Unit]
+Description=SSH Guardian - SSH brute-force protection with UFW
+Documentation=https://github.com/yourname/ssh_guardian
+After=network.target ufw.service
+Wants=ufw.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/ssh_guardian
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+
+# 标准输出/错误也写入 journald（补充文件日志）
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ssh_guardian
+
+# 安全加固
+NoNewPrivileges=false
+PrivateTmp=true
+
+# 环境变量（可覆盖默认配置路径）
+# Environment=SSH_GUARDIAN_CONFIG=/etc/ssh_guardian/config.json
+
+[Install]
+WantedBy=multi-user.target

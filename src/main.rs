@@ -103,6 +103,9 @@ fn main() {
         .unwrap()
         .info("主循环启动，每60秒检查一次到期封禁");
 
+    let mut last_event_cleanup = std::time::Instant::now();
+    let mut last_record_cleanup = std::time::Instant::now();
+
     loop {
         #[cfg(unix)]
         if unsafe { !RUNNING } {
@@ -127,6 +130,30 @@ fn main() {
         {
             let mut bm = ban_manager.lock().unwrap();
             bm.check_expired_bans();
+        }
+
+        if last_event_cleanup.elapsed().as_secs() >= config.event_cleanup_interval_secs {
+            // 清理 fail_events
+            let mut db = state_db.lock().unwrap();
+            let cleaned = db.cleanup_expired_events(config.time_window_secs);
+            glog.lock().unwrap().info(&format!(
+                "执行 fail_events 清理：清理 {} 条，剩余 {} 个IP",
+                cleaned,
+                db.fail_events.len()
+            ));
+            last_event_cleanup = std::time::Instant::now();
+        }
+
+        if last_record_cleanup.elapsed().as_secs() >= config.record_cleanup_interval_secs {
+            // 清理 records
+            let mut db = state_db.lock().unwrap();
+            let cleaned = db.cleanup_inactive_records(config.record_retain_days);
+            glog.lock().unwrap().info(&format!(
+                "执行 records 清理：清理 {} 条，剩余 {} 个IP",
+                cleaned,
+                db.records.len()
+            ));
+            last_record_cleanup = std::time::Instant::now();
         }
 
         // 保存状态

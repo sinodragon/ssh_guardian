@@ -11,5 +11,8 @@
     "127.0.0.1",
     "::1",
     "192.168.1.100"
-  ]
+  ],
+  "event_cleanup_interval_secs": 3600,
+  "record_cleanup_interval_secs": 86400,
+  "record_retain_days": 90
 }

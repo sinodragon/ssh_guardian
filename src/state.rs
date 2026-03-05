@@ -1,9 +1,9 @@
 // state.rs — 持久化状态数据库
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 
 /// 单个 IP 的封禁记录
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -26,12 +26,12 @@ pub struct IpRecord {
 impl IpRecord {
     pub fn new(ip: &str) -> Self {
         IpRecord {
-            ip:              ip.to_string(),
-            ban_count:       0,
-            ban_until:       None,
-            permanent:       false,
-            first_seen:      Utc::now(),
-            last_banned:     None,
+            ip: ip.to_string(),
+            ban_count: 0,
+            ban_until: None,
+            permanent: false,
+            first_seen: Utc::now(),
+            last_banned: None,
             last_fail_count: 0,
         }
     }
@@ -50,10 +50,14 @@ impl IpRecord {
     /// 剩余封禁秒数（已解禁或永久封禁时返回 None）
     #[allow(dead_code)]
     pub fn remaining_secs(&self) -> Option<i64> {
-        if self.permanent { return None; }
+        if self.permanent {
+            return None;
+        }
         if let Some(until) = self.ban_until {
             let remaining = (until - Utc::now()).num_seconds();
-            if remaining > 0 { return Some(remaining); }
+            if remaining > 0 {
+                return Some(remaining);
+            }
         }
         None
     }
@@ -108,7 +112,8 @@ impl StateDb {
 
     /// 添加失败事件
     pub fn add_fail_event(&mut self, ip: &str, user: &str, port: Option<u16>) {
-        let events = self.fail_events
+        let events = self
+            .fail_events
             .entry(ip.to_string())
             .or_insert_with(Vec::new);
         events.push(FailEvent {
@@ -121,7 +126,8 @@ impl StateDb {
     /// 获取时间窗口内的失败次数，并清理过期事件
     pub fn fail_count_in_window(&mut self, ip: &str, window_secs: u64) -> u32 {
         let cutoff = Utc::now() - chrono::Duration::seconds(window_secs as i64);
-        let events = self.fail_events
+        let events = self
+            .fail_events
             .entry(ip.to_string())
             .or_insert_with(Vec::new);
         // 清理过期事件
@@ -136,9 +142,51 @@ impl StateDb {
 
     /// 获取所有当前临时封禁中的记录（用于到期检查）
     pub fn active_temp_bans(&self) -> Vec<IpRecord> {
-        self.records.values()
+        self.records
+            .values()
             .filter(|r| !r.permanent && r.ban_until.is_some() && r.is_currently_banned())
             .cloned()
             .collect()
+    }
+
+    /// 清理所有 IP 中已过期的失败事件，返回清理的条目数
+    pub fn cleanup_expired_events(&mut self, window_secs: u64) -> usize {
+        let cutoff = Utc::now() - chrono::Duration::seconds(window_secs as i64);
+        let mut cleaned = 0;
+
+        self.fail_events.retain(|_ip, events| {
+            let before = events.len();
+            events.retain(|e| e.time > cutoff);
+            cleaned += before - events.len();
+            // 事件全部过期则移除该 IP 的条目
+            !events.is_empty()
+        });
+
+        cleaned
+    }
+
+    /// 清理长期未活跃的历史记录（非永久封禁、已解禁、且超过保留期）
+    pub fn cleanup_inactive_records(&mut self, retain_days: i64) -> usize {
+        let cutoff = Utc::now() - chrono::Duration::days(retain_days);
+        let before = self.records.len();
+
+        self.records.retain(|_ip, record| {
+            // 永久封禁记录永远保留
+            if record.permanent {
+                return true;
+            }
+            // 当前仍在封禁中，保留
+            if record.is_currently_banned() {
+                return true;
+            }
+            // 最近有过封禁行为且未超过保留期，保留
+            if let Some(last) = record.last_banned {
+                return last > cutoff;
+            }
+            // 从未被封禁过（只有失败记录但未达阈值），超过窗口期则清理
+            record.first_seen > cutoff
+        });
+
+        before - self.records.len()
     }
 }

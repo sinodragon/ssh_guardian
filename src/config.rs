@@ -23,6 +23,9 @@ pub struct Config {
     pub log_file: String,
     /// 白名单 IP 列表（不会被封禁）
     pub whitelist: Vec<String>,
+    pub event_cleanup_interval_secs: u64, // fail_events 清理间隔
+    pub record_cleanup_interval_secs: u64, // records 清理间隔
+    pub record_retain_days: i64,          // 非永久封禁记录保留天数
 }
 
 impl Default for Config {
@@ -37,6 +40,9 @@ impl Default for Config {
             state_file: "/var/lib/ssh_guardian/state.json".to_string(),
             log_file: "/var/log/ssh_guardian.log".to_string(),
             whitelist: vec!["127.0.0.1".to_string(), "::1".to_string()],
+            event_cleanup_interval_secs: 3600,
+            record_cleanup_interval_secs: 86400,
+            record_retain_days: 90,
         }
     }
 }

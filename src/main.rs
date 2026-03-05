@@ -140,6 +140,7 @@ fn main() {
 
         // 每60秒检查一次
         for _ in 0..60 {
+            #[cfg(unix)]
             if unsafe { !RUNNING } {
                 break;
             }

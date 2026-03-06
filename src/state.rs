@@ -126,13 +126,16 @@ impl StateDb {
     /// 获取时间窗口内的失败次数，并清理过期事件
     pub fn fail_count_in_window(&mut self, ip: &str, window_secs: u64) -> u32 {
         let cutoff = Utc::now() - chrono::Duration::seconds(window_secs as i64);
-        let events = self
-            .fail_events
-            .entry(ip.to_string())
-            .or_insert_with(Vec::new);
-        // 清理过期事件
-        events.retain(|e| e.time > cutoff);
-        events.len() as u32
+        if let Some(events) = self.fail_events.get_mut(ip) {
+            events.retain(|e| e.time > cutoff);
+            let count = events.len() as u32;
+            if count == 0 {
+                self.fail_events.remove(ip);
+            }
+            count
+        } else {
+            0
+        }
     }
 
     /// 清理某IP的失败事件（封禁后重置）

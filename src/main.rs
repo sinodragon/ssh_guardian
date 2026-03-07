@@ -61,6 +61,7 @@ fn main() {
         let mut l = glog.lock().unwrap();
         l.info("════════════════════════════════════════");
         l.info("  SSH Guardian 启动");
+        l.info(&format!("  版本          : {}", env!("CARGO_PKG_VERSION")));
         l.info(&format!("  auth.log      : {}", config.auth_log));
         l.info(&format!(
             "  失败阈值      : {} 次 / {} 秒",
@@ -72,7 +73,7 @@ fn main() {
         ));
         l.info(&format!("  永久封禁阈值  : {} 次", config.max_ban_count));
         l.info(&format!("  状态数据库    : {}", config.state_file));
-        l.info(&format!("  SSH端口      : {}", config.ssh_port));
+        l.info(&format!("  SSH端口       : {}", config.ssh_port));
         l.info(&format!(
             "  event清理间隔 : {} 秒",
             config.event_cleanup_interval_secs
@@ -177,7 +178,7 @@ fn main() {
         // 每60秒检查一次
         for _ in 0..60 {
             #[cfg(unix)]
-            if unsafe { !RUNNING } {
+            if unsafe { !RUNNING || RELOAD_LOG } {
                 break;
             }
             thread::sleep(Duration::from_secs(1));

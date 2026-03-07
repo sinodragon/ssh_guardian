@@ -72,6 +72,15 @@ fn main() {
         ));
         l.info(&format!("  永久封禁阈值  : {} 次", config.max_ban_count));
         l.info(&format!("  状态数据库    : {}", config.state_file));
+        l.info(&format!("  SSH端口      : {}", config.ssh_port));
+        l.info(&format!(
+            "  event清理间隔 : {} 秒",
+            config.event_cleanup_interval_secs
+        ));
+        l.info(&format!(
+            "  record清理间隔: {} 秒",
+            config.record_cleanup_interval_secs
+        ));
         l.info("════════════════════════════════════════");
     }
 

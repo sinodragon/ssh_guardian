@@ -129,8 +129,9 @@ fn main() {
             }
             match GuardianLogger::new(&config.log_file) {
                 Ok(new_logger) => {
-                    *glog.lock().unwrap() = new_logger;
-                    glog.lock().unwrap().info("收到 SIGHUP，日志文件已重新打开");
+                    let mut logger = glog.lock().unwrap();
+                    *logger = new_logger;
+                    logger.info("收到 SIGHUP，日志文件已重新打开");
                 }
                 Err(e) => eprintln!("重新打开日志文件失败: {}", e),
             }
@@ -168,10 +169,14 @@ fn main() {
 
         // 保存状态
         {
-            let db = state_db.lock().unwrap();
-            let cfg_path = &config.state_file;
-            if let Err(e) = db.save(cfg_path) {
-                glog.lock().unwrap().error(&format!("状态保存失败: {}", e));
+            let mut db = state_db.lock().unwrap();
+            if db.dirty {
+                let cfg_path = &config.state_file;
+                if let Err(e) = db.save(cfg_path) {
+                    glog.lock().unwrap().error(&format!("状态保存失败: {}", e));
+                } else {
+                    db.dirty = false;
+                }
             }
         }
 

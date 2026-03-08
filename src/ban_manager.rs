@@ -137,31 +137,39 @@ impl BanManager {
     ) {
         // 先检查是否已有 UFW 规则（避免重复）
         if self.ufw_rule_exists(ip) {
-            self.logger
-                .lock()
-                .unwrap()
-                .warn(&format!("IP={} UFW 规则已存在，跳过重复添加", ip));
-        } else {
-            match self.ufw_deny(ip) {
-                Ok(_) => {
-                    if permanent {
-                        self.logger.lock().unwrap().perm_ban(ip, ban_count);
-                    } else {
-                        self.logger.lock().unwrap().ban(
-                            ip,
-                            Some(duration_secs),
-                            ban_count,
-                            fail_count,
-                        );
-                    }
-                }
-                Err(e) => {
+            // 规则存在但仍检测到失败，说明规则未正确生效
+            // 先删除旧规则，重新插入到第1位确保优先匹配
+            self.logger.lock().unwrap().warn(&format!(
+                "IP={} UFW 规则已存在但仍检测到失败，删除旧规则并重新插入",
+                ip
+            ));
+            if let Err(e) = self.ufw_delete(ip) {
+                self.logger
+                    .lock()
+                    .unwrap()
+                    .error(&format!("IP={} 删除旧规则失败: {}", ip, e));
+                // 删除失败则放弃本次封禁，避免状态混乱
+                return;
+            }
+        }
+
+        match self.ufw_deny(ip) {
+            Ok(_) => {
+                if permanent {
+                    self.logger.lock().unwrap().perm_ban(ip, ban_count);
+                } else {
                     self.logger
                         .lock()
                         .unwrap()
-                        .error(&format!("UFW 封禁 IP={} 失败: {}", ip, e));
-                    return;
+                        .ban(ip, Some(duration_secs), ban_count, fail_count);
                 }
+            }
+            Err(e) => {
+                self.logger
+                    .lock()
+                    .unwrap()
+                    .error(&format!("UFW 封禁 IP={} 失败: {}", ip, e));
+                return;
             }
         }
 
@@ -203,6 +211,7 @@ impl BanManager {
             record.ban_until = None;
             record.permanent = false;
         }
+        db.dirty = true;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -274,9 +283,10 @@ impl BanManager {
         match output {
             Ok(o) => {
                 let stdout = String::from_utf8_lossy(&o.stdout);
-                stdout.contains(ip)
-                    && stdout.contains(&self.config.ssh_port.to_string())
-                    && stdout.contains("DENY")
+                let port = self.config.ssh_port.to_string();
+                stdout
+                    .lines()
+                    .any(|line| line.contains(ip) && line.contains(&port) && line.contains("DENY"))
             }
             Err(_) => false,
         }

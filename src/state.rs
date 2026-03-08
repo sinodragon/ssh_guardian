@@ -78,6 +78,8 @@ pub struct StateDb {
     pub records: HashMap<String, IpRecord>,
     /// IP -> 最近失败事件列表（用于时间窗口统计）
     pub fail_events: HashMap<String, Vec<FailEvent>>,
+    #[serde(skip)]
+    pub dirty: bool,
 }
 
 impl StateDb {
@@ -105,6 +107,7 @@ impl StateDb {
 
     /// 获取或创建 IP 记录
     pub fn get_or_create(&mut self, ip: &str) -> &mut IpRecord {
+        self.dirty = true;
         self.records
             .entry(ip.to_string())
             .or_insert_with(|| IpRecord::new(ip))
@@ -121,6 +124,7 @@ impl StateDb {
             user: user.to_string(),
             port,
         });
+        self.dirty = true;
     }
 
     /// 获取时间窗口内的失败次数，并清理过期事件
@@ -131,6 +135,7 @@ impl StateDb {
             let count = events.len() as u32;
             if count == 0 {
                 self.fail_events.remove(ip);
+                self.dirty = true;
             }
             count
         } else {
@@ -141,6 +146,7 @@ impl StateDb {
     /// 清理某IP的失败事件（封禁后重置）
     pub fn clear_fail_events(&mut self, ip: &str) {
         self.fail_events.remove(ip);
+        self.dirty = true;
     }
 
     /// 获取所有当前临时封禁中的记录（用于到期检查）
@@ -164,6 +170,9 @@ impl StateDb {
             // 事件全部过期则移除该 IP 的条目
             !events.is_empty()
         });
+        if cleaned > 0 {
+            self.dirty = true;
+        }
 
         cleaned
     }
@@ -189,6 +198,10 @@ impl StateDb {
             // 从未被封禁过（只有失败记录但未达阈值），超过窗口期则清理
             record.first_seen > cutoff
         });
+
+        if before != self.records.len() {
+            self.dirty = true;
+        }
 
         before - self.records.len()
     }

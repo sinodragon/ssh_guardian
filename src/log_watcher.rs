@@ -67,6 +67,7 @@ impl LogWatcher {
         }
 
         let mut reader = BufReader::new(file);
+        let mut eof_count = 0u32;
 
         loop {
             let mut line = String::new();
@@ -74,6 +75,10 @@ impl LogWatcher {
                 Ok(0) => {
                     // 没有新内容，等待后重试
                     thread::sleep(Duration::from_millis(500));
+                    eof_count += 1;
+
+                    if eof_count % 10 != 0 { continue; }
+                    eof_count = 0;
 
                     // 检查文件是否被日志轮转（inode 变化）
                     // 简单处理：每次 Ok(0) 时重新 open
@@ -99,6 +104,7 @@ impl LogWatcher {
                     continue;
                 }
                 Ok(_) => {
+                    eof_count = 0;
                     let line = line.trim_end().to_string();
                     if line.is_empty() {
                         continue;
@@ -126,23 +132,23 @@ impl LogWatcher {
     fn build_patterns() -> Vec<Regex> {
         vec![
             // Failed password for <user> from <ip> port <port>
-            Regex::new(r"Failed password for (?:invalid user )?(\S+) from ([\d\.]+) port (\d+)")
+            Regex::new(r"Failed password for (?:invalid user )?(\S+) from ([\d.]+) port (\d+)")
                 .unwrap(),
             // Failed password for invalid user <user> from <ip> port <port>
             // (已被上面的可选 group 覆盖)
 
             // Invalid user <user> from <ip> port <port>
-            Regex::new(r"Invalid user (\S+) from ([\d\.]+)(?:\s+port\s+(\d+))?").unwrap(),
+            Regex::new(r"Invalid user (\S+) from ([\d.]+)(?:\s+port\s+(\d+))?").unwrap(),
             // pam_unix authentication failure ... rhost=<ip>  user=<user>
-            Regex::new(r"authentication failure;.*rhost=([\d\.]+).*user=(\S+)").unwrap(),
+            Regex::new(r"authentication failure;.*rhost=([\d.]+).*user=(\S+)").unwrap(),
             // BREAK-IN ATTEMPT from <ip>
-            Regex::new(r"BREAK-IN ATTEMPT from ([\d\.]+)").unwrap(),
+            Regex::new(r"BREAK-IN ATTEMPT from ([\d.]+)").unwrap(),
             // Did not receive identification string from <ip>
-            Regex::new(r"Did not receive identification string from ([\d\.]+)").unwrap(),
+            Regex::new(r"Did not receive identification string from ([\d.]+)").unwrap(),
             // Connection closed by <ip> port <port> [preauth]
-            Regex::new(r"Connection closed by ([\d\.]+) port (\d+) \[preauth\]").unwrap(),
+            Regex::new(r"Connection closed by ([\d.]+) port (\d+) \[preauth]").unwrap(),
             // Disconnecting invalid user <user> <ip> port <port>
-            Regex::new(r"Disconnecting invalid user (\S+) ([\d\.]+) port (\d+)").unwrap(),
+            Regex::new(r"Disconnecting invalid user (\S+) ([\d.]+) port (\d+)").unwrap(),
         ]
     }
 

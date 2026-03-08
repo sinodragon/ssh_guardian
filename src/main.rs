@@ -196,6 +196,7 @@ fn main() {
         l.info("收到退出信号，正在保存状态并退出...");
     }
 
+    // 退出时无条件保存，确保最新状态保存到文件，不依赖 dirty 标记
     {
         let db = state_db.lock().unwrap();
         db.save(&config.state_file).ok();

@@ -11,6 +11,7 @@ pub struct BanManager {
     state_db: Arc<Mutex<StateDb>>,
     logger: Arc<Mutex<GuardianLogger>>,
     config: Config,
+    ssh_port: String,
 }
 
 impl BanManager {
@@ -19,10 +20,12 @@ impl BanManager {
         logger: Arc<Mutex<GuardianLogger>>,
         config: Config,
     ) -> Self {
+        let ssh_port = config.ssh_port.to_string();
         BanManager {
             state_db,
             logger,
             config,
+            ssh_port,
         }
     }
 
@@ -34,15 +37,11 @@ impl BanManager {
             return;
         }
 
-        // 1. 添加失败事件
-        {
-            let mut db = self.state_db.lock().unwrap();
-            db.add_fail_event(ip, user, port);
-        }
-
-        // 2. 统计窗口内失败次数
         let fail_count = {
             let mut db = self.state_db.lock().unwrap();
+            // 1. 添加失败事件
+            db.add_fail_event(ip, user, port);
+            // 2. 统计窗口内失败次数
             db.fail_count_in_window(ip, self.config.time_window_secs)
         };
 
@@ -212,6 +211,16 @@ impl BanManager {
             record.permanent = false;
         }
         db.dirty = true;
+
+        // 立即保存，解禁是关键状态变更
+        if let Err(e) = db.save(&self.config.state_file) {
+            self.logger
+                .lock()
+                .unwrap()
+                .error(&format!("解禁后状态保存失败 IP={}: {}", ip, e));
+        } else {
+            db.dirty = false;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -230,7 +239,7 @@ impl BanManager {
                 "to",
                 "any",
                 "port",
-                &self.config.ssh_port.to_string(),
+                &self.ssh_port,
                 "comment",
                 "ssh_guardian",
             ])
@@ -259,7 +268,7 @@ impl BanManager {
                 "to",
                 "any",
                 "port",
-                &self.config.ssh_port.to_string(),
+                &self.ssh_port,
             ])
             .output()
             .map_err(|e| format!("执行 ufw 失败: {}", e))?;
@@ -283,10 +292,10 @@ impl BanManager {
         match output {
             Ok(o) => {
                 let stdout = String::from_utf8_lossy(&o.stdout);
-                let port = self.config.ssh_port.to_string();
+                let port = &self.ssh_port;
                 stdout
                     .lines()
-                    .any(|line| line.contains(ip) && line.contains(&port) && line.contains("DENY"))
+                    .any(|line| line.contains(ip) && line.contains(port) && line.contains("DENY"))
             }
             Err(_) => false,
         }

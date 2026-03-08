@@ -107,7 +107,7 @@ impl StateDb {
 
     /// 获取或创建 IP 记录
     pub fn get_or_create(&mut self, ip: &str) -> &mut IpRecord {
-        self.dirty = true;
+        self.dirty = true;  // 该方法返回的 IP 记录用于更新状态数据，所以设置为 dirty
         self.records
             .entry(ip.to_string())
             .or_insert_with(|| IpRecord::new(ip))

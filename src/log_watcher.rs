@@ -10,10 +10,19 @@ use crate::ban_manager::BanManager;
 use crate::config::Config;
 use crate::logger::GuardianLogger;
 
+struct PatternConfig {
+    ip_group: usize,
+    user_group: Option<usize>,
+    port_group: Option<usize>,
+    default_user: &'static str,
+}
+
 pub struct LogWatcher {
     ban_manager: Arc<Mutex<BanManager>>,
     logger: Arc<Mutex<GuardianLogger>>,
     config: Config,
+    patterns: Vec<Regex>,
+    pattern_configs: Vec<PatternConfig>,
 }
 
 /// 解析出的 SSH 失败登录事件
@@ -34,13 +43,12 @@ impl LogWatcher {
             ban_manager,
             logger,
             config,
+            patterns: Self::build_patterns(),
+            pattern_configs: Self::build_pattern_configs(),
         }
     }
 
     pub fn run(&mut self) {
-        // 构建 SSH 失败日志正则表达式组
-        let patterns = Self::build_patterns();
-
         self.logger
             .lock()
             .unwrap()
@@ -77,7 +85,9 @@ impl LogWatcher {
                     thread::sleep(Duration::from_millis(500));
                     eof_count += 1;
 
-                    if eof_count % 10 != 0 { continue; }
+                    if eof_count % 10 != 0 {
+                        continue;
+                    }
                     eof_count = 0;
 
                     // 检查文件是否被日志轮转（inode 变化）
@@ -110,7 +120,9 @@ impl LogWatcher {
                         continue;
                     }
 
-                    if let Some(event) = Self::parse_line(&line, &patterns) {
+                    if let Some(event) =
+                        Self::parse_line(&line, &self.patterns, &self.pattern_configs)
+                    {
                         let mut bm = self.ban_manager.lock().unwrap();
                         bm.record_failure(&event.ip, &event.user, event.port);
                     }
@@ -152,99 +164,87 @@ impl LogWatcher {
         ]
     }
 
+    fn build_pattern_configs() -> Vec<PatternConfig> {
+        vec![
+            // Failed password: user=1, ip=2, port=3
+            PatternConfig {
+                ip_group: 2,
+                user_group: Some(1),
+                port_group: Some(3),
+                default_user: "unknown",
+            },
+            // Invalid user: user=1, ip=2, port=3
+            PatternConfig {
+                ip_group: 2,
+                user_group: Some(1),
+                port_group: Some(3),
+                default_user: "unknown",
+            },
+            // pam_unix: ip=1, user=2
+            PatternConfig {
+                ip_group: 1,
+                user_group: Some(2),
+                port_group: None,
+                default_user: "unknown",
+            },
+            // BREAK-IN ATTEMPT: ip=1
+            PatternConfig {
+                ip_group: 1,
+                user_group: None,
+                port_group: None,
+                default_user: "unknown",
+            },
+            // Did not receive: ip=1
+            PatternConfig {
+                ip_group: 1,
+                user_group: None,
+                port_group: None,
+                default_user: "unknown",
+            },
+            // Connection closed: ip=1, port=2
+            PatternConfig {
+                ip_group: 1,
+                user_group: None,
+                port_group: Some(2),
+                default_user: "preauth",
+            },
+            // Disconnecting invalid user: user=1, ip=2, port=3
+            PatternConfig {
+                ip_group: 2,
+                user_group: Some(1),
+                port_group: Some(3),
+                default_user: "unknown",
+            },
+        ]
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // 解析单行日志
     // ─────────────────────────────────────────────────────────────────────────
-    fn parse_line(line: &str, patterns: &[Regex]) -> Option<FailedLogin> {
+    fn parse_line(
+        line: &str,
+        patterns: &[Regex],
+        configs: &[PatternConfig],
+    ) -> Option<FailedLogin> {
         // 仅处理包含 sshd 的行
         if !line.contains("sshd") {
             return None;
         }
 
-        // 模式1: Failed password for [invalid user] <user> from <ip> port <port>
-        if let Some(caps) = patterns[0].captures(line) {
-            let user = caps.get(1).map_or("unknown", |m| m.as_str());
-            let ip = caps.get(2).map_or("", |m| m.as_str());
-            let port = caps.get(3).and_then(|m| m.as_str().parse().ok());
-            if !ip.is_empty() {
-                return Some(FailedLogin {
-                    ip: ip.to_string(),
-                    user: user.to_string(),
-                    port,
-                });
-            }
-        }
-
-        // 模式2: Invalid user <user> from <ip>
-        if let Some(caps) = patterns[1].captures(line) {
-            let user = caps.get(1).map_or("unknown", |m| m.as_str());
-            let ip = caps.get(2).map_or("", |m| m.as_str());
-            let port = caps.get(3).and_then(|m| m.as_str().parse().ok());
-            if !ip.is_empty() {
-                return Some(FailedLogin {
-                    ip: ip.to_string(),
-                    user: user.to_string(),
-                    port,
-                });
-            }
-        }
-
-        // 模式3: pam_unix ... rhost=<ip> ... user=<user>
-        if let Some(caps) = patterns[2].captures(line) {
-            let ip = caps.get(1).map_or("", |m| m.as_str());
-            let user = caps.get(2).map_or("unknown", |m| m.as_str());
-            if !ip.is_empty() {
-                return Some(FailedLogin {
-                    ip: ip.to_string(),
-                    user: user.to_string(),
-                    port: None,
-                });
-            }
-        }
-
-        // 模式4: BREAK-IN ATTEMPT from <ip>
-        if let Some(caps) = patterns[3].captures(line) {
-            let ip = caps.get(1).map_or("", |m| m.as_str());
-            if !ip.is_empty() {
-                return Some(FailedLogin {
-                    ip: ip.to_string(),
-                    user: "unknown".to_string(),
-                    port: None,
-                });
-            }
-        }
-
-        // 模式5: Did not receive identification string from <ip>
-        if let Some(caps) = patterns[4].captures(line) {
-            let ip = caps.get(1).map_or("", |m| m.as_str());
-            if !ip.is_empty() {
-                return Some(FailedLogin {
-                    ip: ip.to_string(),
-                    user: "unknown".to_string(),
-                    port: None,
-                });
-            }
-        }
-
-        // 模式6: Connection closed by <ip> port <port> [preauth]
-        if let Some(caps) = patterns[5].captures(line) {
-            let ip = caps.get(1).map_or("", |m| m.as_str());
-            let port = caps.get(2).and_then(|m| m.as_str().parse().ok());
-            if !ip.is_empty() {
-                return Some(FailedLogin {
-                    ip: ip.to_string(),
-                    user: "preauth".to_string(),
-                    port,
-                });
-            }
-        }
-
-        // 模式7: Disconnecting invalid user <user> <ip> port <port>
-        if let Some(caps) = patterns[6].captures(line) {
-            let user = caps.get(1).map_or("unknown", |m| m.as_str());
-            let ip = caps.get(2).map_or("", |m| m.as_str());
-            let port = caps.get(3).and_then(|m| m.as_str().parse().ok());
-            if !ip.is_empty() {
+        for (pattern, cfg) in patterns.iter().zip(configs.iter()) {
+            if let Some(caps) = pattern.captures(line) {
+                let ip = caps.get(cfg.ip_group).map_or("", |m| m.as_str());
+                if ip.is_empty() {
+                    continue;
+                }
+                let user = cfg
+                    .user_group
+                    .and_then(|g| caps.get(g))
+                    .map_or(cfg.default_user, |m| m.as_str());
+                let port = cfg
+                    .port_group
+                    .and_then(|g| caps.get(g))
+                    .and_then(|m| m.as_str().parse().ok());
                 return Some(FailedLogin {
                     ip: ip.to_string(),
                     user: user.to_string(),

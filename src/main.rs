@@ -8,6 +8,7 @@ mod config;
 mod log_watcher;
 mod logger;
 mod state;
+mod ipc;
 
 #[cfg(unix)]
 use nix::sys::signal::{self, SigHandler, Signal};
@@ -105,6 +106,16 @@ fn main() {
         let mut watcher = log_watcher;
         thread::spawn(move || {
             watcher.run();
+        })
+    };
+
+    // ── 启动 IPC 监听线程 ─────────────────────────────────────────────────────
+    let _ipc_handle = {
+        let ipc_ban_manager = Arc::clone(&ban_manager);
+        let ipc_state_db    = Arc::clone(&state_db);
+        let ipc_glog        = Arc::clone(&glog);
+        thread::spawn(move || {
+            ipc::listen(ipc_ban_manager, ipc_state_db, ipc_glog);
         })
     };
 

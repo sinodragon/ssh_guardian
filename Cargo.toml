@@ -1,13 +1,21 @@
 [package]
 name = "ssh_guardian"
-version = "1.0.8-beta"
+version = "1.0.9"
 edition = "2024"
 authors = ["flying4x"]
 description = "SSH brute-force protection daemon with UFW integration"
 
+[lib]
+name = "ssh_guardian"
+path = "src/lib.rs"
+
 [[bin]]
 name = "ssh_guardian"
 path = "src/main.rs"
+
+[[bin]]
+name = "sgctl"
+path = "src/bin/sgctl.rs"
 
 [dependencies]
 # 序列化 / 持久化

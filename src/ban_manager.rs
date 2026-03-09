@@ -57,15 +57,7 @@ impl BanManager {
         }
 
         // 5. 判断是否已在封禁中
-        let already_banned = {
-            let db = self.state_db.lock().unwrap();
-            db.records
-                .get(ip)
-                .map(|r| r.is_currently_banned())
-                .unwrap_or(false)
-        };
-
-        if already_banned {
+        if self.is_ip_banned(ip) {
             // 封禁期间再次触发，仅记录，不重置计时
             let mut log = self.logger.lock().unwrap();
             log.warn(&format!(
@@ -76,19 +68,7 @@ impl BanManager {
         }
 
         // 6. 计算新封禁参数
-        let (new_ban_count, duration_secs, permanent) = {
-            let db = self.state_db.lock().unwrap();
-            let ban_count = db.records.get(ip).map(|r| r.ban_count).unwrap_or(0);
-            let new_count = ban_count + 1;
-            if new_count >= self.config.max_ban_count {
-                (new_count, 0u64, true)
-            } else {
-                // 封禁时长按 2^(n-1) 倍增长
-                let multiplier = 2u64.pow(new_count - 1);
-                let duration = self.config.ban_duration_secs * multiplier;
-                (new_count, duration, false)
-            }
-        };
+        let (new_ban_count, duration_secs, permanent) = self.calc_ban_params(ip);
 
         // 7. 执行封禁
         self.do_ban(ip, new_ban_count, duration_secs, permanent, fail_count);
@@ -120,6 +100,33 @@ impl BanManager {
 
         for record in expired {
             self.do_unban(&record.ip, record.ban_count, "封禁到期自动解禁");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 判断 IP 是否已被封禁
+    // ─────────────────────────────────────────────────────────────────────────
+    fn is_ip_banned(&self, ip: &str) -> bool {
+        let db = self.state_db.lock().unwrap();
+        db.records
+            .get(ip)
+            .map(|r| r.is_currently_banned())
+            .unwrap_or(false)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 计算封禁参数
+    // ─────────────────────────────────────────────────────────────────────────
+    fn calc_ban_params(&self, ip: &str) -> (u32, u64, bool) {
+        let db = self.state_db.lock().unwrap();
+        let ban_count = db.records.get(ip).map(|r| r.ban_count).unwrap_or(0);
+        let new_count = ban_count + 1;
+        if new_count >= self.config.max_ban_count {
+            (new_count, 0u64, true)
+        } else {
+            let multiplier = 2u64.pow(new_count - 1);
+            let duration = self.config.ban_duration_secs * multiplier;
+            (new_count, duration, false)
         }
     }
 
@@ -221,6 +228,41 @@ impl BanManager {
         } else {
             db.dirty = false;
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 手动封禁指定 IP
+    // ─────────────────────────────────────────────────────────────────────────
+    pub fn manual_ban(&mut self, ip: &str) -> Result<(), String> {
+        if self.config.is_whitelisted(ip) {
+            return Err(format!("IP={} 在白名单中，无法封禁", ip));
+        }
+
+        if self.is_ip_banned(ip) {
+            return Err(format!("IP={} 已处于封禁状态", ip));
+        }
+
+        let (new_ban_count, duration_secs, permanent) = self.calc_ban_params(ip);
+
+        self.do_ban(ip, new_ban_count, duration_secs, permanent, 0);
+        Ok(())
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 手动解封指定 IP
+    // ─────────────────────────────────────────────────────────────────────────
+    pub fn manual_unban(&mut self, ip: &str) -> Result<(), String> {
+        let ban_count = {
+            let db = self.state_db.lock().unwrap();
+            match db.records.get(ip) {
+                Some(r) if r.is_currently_banned() => r.ban_count,
+                Some(_) => return Err(format!("IP={} 当前未处于封禁状态", ip)),
+                None => return Err(format!("IP={} 没有封禁记录", ip)),
+            }
+        };
+
+        self.do_unban(ip, ban_count, "手动解禁");
+        Ok(())
     }
 
     // ─────────────────────────────────────────────────────────────────────────

@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
-use ssh_guardian::ipc::{Command, HistoryFailRecord, Response, SOCKET_PATH};
+use ssh_guardian::ipc::{Command, Response, SOCKET_PATH};
 use ssh_guardian::state::IpRecord;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
+use ssh_guardian::patterns::HistoryFailRecord;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

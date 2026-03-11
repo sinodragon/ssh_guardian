@@ -1,8 +1,7 @@
 use crate::ban_manager::BanManager;
 use crate::config::Config;
-use crate::log_watcher::LogWatcher;
 use crate::logger::GuardianLogger;
-use crate::patterns::PatternConfig;
+use crate::patterns::{scan_history_range, HistoryFailRecord, PatternConfig};
 use crate::state::{IpRecord, StateDb};
 use chrono::{DateTime, Utc};
 use regex::Regex;
@@ -14,16 +13,6 @@ use std::os::unix::net::UnixListener;
 use std::sync::{Arc, Mutex};
 
 pub const SOCKET_PATH: &str = "/var/run/ssh_guardian.sock";
-
-// 单条历史失败记录
-#[derive(Serialize, Deserialize)]
-pub struct HistoryFailRecord {
-    pub ip: String,
-    pub fail_count: u32,
-    pub first_seen: DateTime<Utc>,
-    pub last_seen: DateTime<Utc>,
-    pub users: Vec<String>, // 尝试过的用户名列表
-}
 
 #[derive(Serialize, Deserialize)]
 pub enum Command {
@@ -229,7 +218,7 @@ fn handle_command(
                 (db.last_shutdown, db.start_time)
             };
 
-            let records = LogWatcher::scan_history_range(
+            let records = scan_history_range(
                 &config.auth_log,
                 from,
                 to,

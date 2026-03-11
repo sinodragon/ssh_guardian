@@ -1,4 +1,5 @@
-use ssh_guardian::ipc::{Command, Response, SOCKET_PATH};
+use chrono::{DateTime, Utc};
+use ssh_guardian::ipc::{Command, HistoryFailRecord, Response, SOCKET_PATH};
 use ssh_guardian::state::IpRecord;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -18,6 +19,7 @@ fn main() {
             let ip = args.get(2).expect("用法: sgctl ban <IP>");
             Command::Ban { ip: ip.clone() }
         }
+        Some("scan") => Command::ScanHistory,
         _ => {
             eprintln!("用法:");
             eprintln!("  sgctl status          查看全部状态");
@@ -25,6 +27,7 @@ fn main() {
             eprintln!("  sgctl tracked         列出追踪中的IP");
             eprintln!("  sgctl unban <IP>      手动解禁");
             eprintln!("  sgctl ban   <IP>      手动封禁");
+            eprintln!("  sgctl scan            扫描历史记录");
             std::process::exit(1);
         }
     };
@@ -66,7 +69,50 @@ fn print_response(resp: Response) {
         Response::Tracked { records } => print_tracked_list(&records),
         Response::Ok { message } => println!("✓ {}", message),
         Response::Err { message } => eprintln!("✗ {}", message),
+        Response::HistoryScan { from, to, records } => print_scan_history(from, to, &records),
     }
+}
+
+fn print_scan_history(
+    from: Option<DateTime<Utc>>,
+    to: Option<DateTime<Utc>>,
+    records: &Vec<HistoryFailRecord>,
+) {
+    let from_str = from
+        .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|| "未知".to_string());
+    let to_str = to
+        .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|| "未知".to_string());
+
+    println!("════════════════════════════════════════════");
+    println!("  历史扫描结果");
+    println!("  扫描范围: {} → {}", from_str, to_str);
+    println!("  发现 {} 个IP有失败记录", records.len());
+    println!("────────────────────────────────────────────");
+
+    if records.is_empty() {
+        println!("  （无失败记录）");
+    } else {
+        println!(
+            "  {:<18} {:>6}  {:<19}  {:<19}  {}",
+            "IP", "失败", "首次", "最近", "尝试用户"
+        );
+        println!("  {}", "─".repeat(80));
+        for r in records {
+            println!(
+                "  {:<18} {:>6}  {}  {}  {}",
+                r.ip,
+                r.fail_count,
+                r.first_seen.format("%Y-%m-%d %H:%M:%S"),
+                r.last_seen.format("%Y-%m-%d %H:%M:%S"),
+                r.users.join(", "),
+            );
+        }
+        println!("────────────────────────────────────────────");
+        println!("  提示：使用 sgctl ban <IP> 手动封禁可疑IP");
+    }
+    println!("════════════════════════════════════════════");
 }
 
 fn print_tracked_list(tracked: &Vec<(String, usize)>) {

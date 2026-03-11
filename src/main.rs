@@ -5,22 +5,23 @@
 
 mod ban_manager;
 mod config;
+mod ipc;
 mod log_watcher;
 mod logger;
+mod patterns;
 mod state;
-mod ipc;
-
-#[cfg(unix)]
-use nix::sys::signal::{self, SigHandler, Signal};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
 
 use ban_manager::BanManager;
+use chrono::Utc;
 use config::Config;
 use log_watcher::LogWatcher;
 use logger::GuardianLogger;
+#[cfg(unix)]
+use nix::sys::signal::{self, SigHandler, Signal};
 use state::StateDb;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 #[cfg(unix)]
 static mut RUNNING: bool = true;
@@ -95,11 +96,28 @@ fn main() {
     });
     let state_db = Arc::new(Mutex::new(state_db));
 
+    // ── 记录本次启动时间 ──────────────────────────────────────────────────────
+    {
+        let mut db = state_db.lock().unwrap();
+        db.start_time = Some(Utc::now());
+        db.save(&config.state_file).ok();
+    }
+
+    // ── 构建正则表达式（全局共享）────────────────────────────────────────────
+    let patterns = Arc::new(patterns::build_patterns());
+    let pattern_configs = Arc::new(patterns::build_pattern_configs());
+
     // ── 初始化组件 ────────────────────────────────────────────────────────────
     let ban_manager = BanManager::new(Arc::clone(&state_db), Arc::clone(&glog), config.clone());
     let ban_manager = Arc::new(Mutex::new(ban_manager));
 
-    let log_watcher = LogWatcher::new(Arc::clone(&ban_manager), Arc::clone(&glog), config.clone());
+    let log_watcher = LogWatcher::new(
+        Arc::clone(&ban_manager),
+        Arc::clone(&glog),
+        config.clone(),
+        Arc::clone(&patterns),
+        Arc::clone(&pattern_configs),
+    );
 
     // ── 启动 auth.log 监听线程 ────────────────────────────────────────────────
     let _watcher_handle = {
@@ -112,10 +130,20 @@ fn main() {
     // ── 启动 IPC 监听线程 ─────────────────────────────────────────────────────
     let _ipc_handle = {
         let ipc_ban_manager = Arc::clone(&ban_manager);
-        let ipc_state_db    = Arc::clone(&state_db);
-        let ipc_glog        = Arc::clone(&glog);
+        let ipc_state_db = Arc::clone(&state_db);
+        let ipc_glog = Arc::clone(&glog);
+        let ipc_config = config.clone();
+        let ipc_pattern = Arc::clone(&patterns);
+        let ipc_pattern_configs = Arc::clone(&pattern_configs);
         thread::spawn(move || {
-            ipc::listen(ipc_ban_manager, ipc_state_db, ipc_glog);
+            ipc::listen(
+                ipc_ban_manager,
+                ipc_state_db,
+                ipc_glog,
+                ipc_config,
+                ipc_pattern,
+                ipc_pattern_configs,
+            );
         })
     };
 
@@ -209,7 +237,8 @@ fn main() {
 
     // 退出时无条件保存，确保最新状态保存到文件，不依赖 dirty 标记
     {
-        let db = state_db.lock().unwrap();
+        let mut db = state_db.lock().unwrap();
+        db.last_shutdown = Some(Utc::now());
         db.save(&config.state_file).ok();
     }
 

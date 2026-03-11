@@ -1,16 +1,29 @@
+use crate::ban_manager::BanManager;
+use crate::config::Config;
+use crate::log_watcher::LogWatcher;
+use crate::logger::GuardianLogger;
+use crate::patterns::PatternConfig;
+use crate::state::{IpRecord, StateDb};
+use chrono::{DateTime, Utc};
+use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::sync::{Arc, Mutex};
 
-use serde::{Deserialize, Serialize};
-
-use crate::ban_manager::BanManager;
-use crate::logger::GuardianLogger;
-use crate::state::{IpRecord, StateDb};
-
 pub const SOCKET_PATH: &str = "/var/run/ssh_guardian.sock";
+
+// 单条历史失败记录
+#[derive(Serialize, Deserialize)]
+pub struct HistoryFailRecord {
+    pub ip: String,
+    pub fail_count: u32,
+    pub first_seen: DateTime<Utc>,
+    pub last_seen: DateTime<Utc>,
+    pub users: Vec<String>, // 尝试过的用户名列表
+}
 
 #[derive(Serialize, Deserialize)]
 pub enum Command {
@@ -20,6 +33,7 @@ pub enum Command {
     Unban { ip: String },
     Ban { ip: String },
     AddWhitelist { ip: String },
+    ScanHistory,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -41,12 +55,21 @@ pub enum Response {
     Err {
         message: String,
     },
+    HistoryScan {
+        // 新增
+        from: Option<DateTime<Utc>>, // 扫描起始时间
+        to: Option<DateTime<Utc>>,   // 扫描结束时间（服务启动时间）
+        records: Vec<HistoryFailRecord>,
+    },
 }
 
 pub fn listen(
     ban_manager: Arc<Mutex<BanManager>>,
     state_db: Arc<Mutex<StateDb>>,
     logger: Arc<Mutex<GuardianLogger>>,
+    config: Config,
+    patterns: Arc<Vec<Regex>>,
+    pattern_configs: Arc<Vec<PatternConfig>>,
 ) {
     let _ = fs::remove_file(SOCKET_PATH);
 
@@ -76,7 +99,15 @@ pub fn listen(
                 }
 
                 let response = match serde_json::from_str::<Command>(line.trim()) {
-                    Ok(cmd) => handle_command(cmd, &ban_manager, &state_db, &logger),
+                    Ok(cmd) => handle_command(
+                        cmd,
+                        &ban_manager,
+                        &state_db,
+                        &logger,
+                        &config,
+                        &patterns,
+                        &pattern_configs,
+                    ),
                     Err(e) => Response::Err {
                         message: format!("命令解析失败: {}", e),
                     },
@@ -98,6 +129,9 @@ fn handle_command(
     ban_manager: &Arc<Mutex<BanManager>>,
     state_db: &Arc<Mutex<StateDb>>,
     logger: &Arc<Mutex<GuardianLogger>>,
+    config: &Config,
+    patterns: &[Regex],
+    pattern_configs: &[PatternConfig],
 ) -> Response {
     match cmd {
         Command::Status => {
@@ -186,6 +220,30 @@ fn handle_command(
                     ip
                 ),
             }
+        }
+
+        Command::ScanHistory => {
+            // 获取扫描时间范围
+            let (from, to) = {
+                let db = state_db.lock().unwrap();
+                (db.last_shutdown, db.start_time)
+            };
+
+            let records = LogWatcher::scan_history_range(
+                &config.auth_log,
+                from,
+                to,
+                config,
+                patterns,
+                pattern_configs,
+            );
+
+            logger.lock().unwrap().info(&format!(
+                "sgctl 请求历史扫描，发现 {} 个IP有失败记录",
+                records.len()
+            ));
+
+            Response::HistoryScan { from, to, records }
         }
     }
 }

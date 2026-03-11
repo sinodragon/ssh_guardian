@@ -14,6 +14,15 @@ use std::sync::{Arc, Mutex};
 
 pub const SOCKET_PATH: &str = "/var/run/ssh_guardian.sock";
 
+struct IpcContext<'a> {
+    ban_manager: &'a Arc<Mutex<BanManager>>,
+    state_db: &'a Arc<Mutex<StateDb>>,
+    logger: &'a Arc<Mutex<GuardianLogger>>,
+    config: &'a Config,
+    patterns: &'a [Regex],
+    pattern_configs: &'a [PatternConfig],
+}
+
 #[derive(Serialize, Deserialize)]
 pub enum Command {
     Status,
@@ -79,6 +88,15 @@ pub fn listen(
         .unwrap()
         .info(&format!("IPC socket 已就绪: {}", SOCKET_PATH));
 
+    let ctx = IpcContext {
+        ban_manager: &ban_manager,
+        state_db: &state_db,
+        logger: &logger,
+        config: &config,
+        patterns: &patterns,
+        pattern_configs: &pattern_configs,
+    };
+
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
@@ -88,15 +106,7 @@ pub fn listen(
                 }
 
                 let response = match serde_json::from_str::<Command>(line.trim()) {
-                    Ok(cmd) => handle_command(
-                        cmd,
-                        &ban_manager,
-                        &state_db,
-                        &logger,
-                        &config,
-                        &patterns,
-                        &pattern_configs,
-                    ),
+                    Ok(cmd) => handle_command(cmd, &ctx),
                     Err(e) => Response::Err {
                         message: format!("命令解析失败: {}", e),
                     },
@@ -113,18 +123,10 @@ pub fn listen(
     }
 }
 
-fn handle_command(
-    cmd: Command,
-    ban_manager: &Arc<Mutex<BanManager>>,
-    state_db: &Arc<Mutex<StateDb>>,
-    logger: &Arc<Mutex<GuardianLogger>>,
-    config: &Config,
-    patterns: &[Regex],
-    pattern_configs: &[PatternConfig],
-) -> Response {
+fn handle_command(cmd: Command, ctx: &IpcContext) -> Response {
     match cmd {
         Command::Status => {
-            let db = state_db.lock().unwrap();
+            let db = ctx.state_db.lock().unwrap();
             let banned = db
                 .records
                 .values()
@@ -144,7 +146,7 @@ fn handle_command(
         }
 
         Command::ListBanned => {
-            let db = state_db.lock().unwrap();
+            let db = ctx.state_db.lock().unwrap();
             let records = db
                 .records
                 .values()
@@ -155,7 +157,7 @@ fn handle_command(
         }
 
         Command::ListTracked => {
-            let db = state_db.lock().unwrap();
+            let db = ctx.state_db.lock().unwrap();
             let records = db
                 .fail_events
                 .iter()
@@ -165,10 +167,10 @@ fn handle_command(
         }
 
         Command::Unban { ip } => {
-            let result = ban_manager.lock().unwrap().manual_unban(&ip);
+            let result = ctx.ban_manager.lock().unwrap().manual_unban(&ip);
             match result {
                 Ok(_) => {
-                    logger
+                    ctx.logger
                         .lock()
                         .unwrap()
                         .info(&format!("sgctl 手动解禁 IP={}", ip));
@@ -181,10 +183,10 @@ fn handle_command(
         }
 
         Command::Ban { ip } => {
-            let result = ban_manager.lock().unwrap().manual_ban(&ip);
+            let result = ctx.ban_manager.lock().unwrap().manual_ban(&ip);
             match result {
                 Ok(_) => {
-                    logger
+                    ctx.logger
                         .lock()
                         .unwrap()
                         .info(&format!("sgctl 手动封禁 IP={}", ip));
@@ -199,7 +201,7 @@ fn handle_command(
         Command::AddWhitelist { ip } => {
             // 白名单写入配置文件需要重新加载，这里只记录日志提示
             // 实际白名单持久化需要修改 config.json，重启服务后生效
-            logger
+            ctx.logger
                 .lock()
                 .unwrap()
                 .info(&format!("sgctl 请求添加白名单 IP={}（需重启服务生效）", ip));
@@ -214,20 +216,20 @@ fn handle_command(
         Command::ScanHistory => {
             // 获取扫描时间范围
             let (from, to) = {
-                let db = state_db.lock().unwrap();
+                let db = ctx.state_db.lock().unwrap();
                 (db.last_shutdown, db.start_time)
             };
 
             let records = scan_history_range(
-                &config.auth_log,
+                &ctx.config.auth_log,
                 from,
                 to,
-                config,
-                patterns,
-                pattern_configs,
+                ctx.config,
+                ctx.patterns,
+                ctx.pattern_configs,
             );
 
-            logger.lock().unwrap().info(&format!(
+            ctx.logger.lock().unwrap().info(&format!(
                 "sgctl 请求历史扫描，发现 {} 个IP有失败记录",
                 records.len()
             ));

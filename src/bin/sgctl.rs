@@ -13,11 +13,17 @@ fn main() {
         Some("banned") => Command::ListBanned,
         Some("tracked") => Command::ListTracked,
         Some("unban") => {
-            let ip = args.get(2).expect("用法: sgctl unban <IP>");
+            let ip = args.get(2).unwrap_or_else(|| {
+                eprintln!("用法: sgctl unban <IP>");
+                std::process::exit(1);
+            });
             Command::Unban { ip: ip.clone() }
         }
         Some("ban") => {
-            let ip = args.get(2).expect("用法: sgctl ban <IP>");
+            let ip = args.get(2).unwrap_or_else(|| {
+                eprintln!("用法: sgctl ban <IP>");
+                std::process::exit(1);
+            });
             Command::Ban { ip: ip.clone() }
         }
         Some("scan") => Command::ScanHistory,
@@ -77,7 +83,7 @@ fn print_response(resp: Response) {
 fn print_scan_history(
     from: Option<DateTime<Utc>>,
     to: Option<DateTime<Utc>>,
-    records: &Vec<HistoryFailRecord>,
+    records: &[HistoryFailRecord],
 ) {
     println!("════════════════════════════════════════════");
     println!("  历史扫描结果");
@@ -109,7 +115,7 @@ fn print_scan_history(
     println!("════════════════════════════════════════════");
 }
 
-fn print_tracked_list(tracked: &Vec<(String, usize)>) {
+fn print_tracked_list(tracked: &[(String, usize)]) {
     println!("═══════════════════════════════════════");
     println!("  追踪中 ({} 个IP)", tracked.len());
     println!("───────────────────────────────────────");
@@ -118,7 +124,7 @@ fn print_tracked_list(tracked: &Vec<(String, usize)>) {
     }
 }
 
-fn print_banned_list(banned: &Vec<IpRecord>) {
+fn print_banned_list(banned: &[IpRecord]) {
     println!("═══════════════════════════════════════");
     println!("  封禁中 ({} 个IP)", banned.len());
     println!("───────────────────────────────────────");
@@ -144,5 +150,5 @@ fn fmt_time(t: DateTime<Utc>) -> String {
 }
 
 fn fmt_time_opt(t: Option<DateTime<Utc>>) -> String {
-    t.map(|t| fmt_time(t)).unwrap_or_else(|| "未知".to_string())
+    t.map(fmt_time).unwrap_or_else(|| "未知".to_string())
 }

@@ -100,7 +100,7 @@ fn main() {
     {
         let mut db = state_db.lock().unwrap();
         db.start_time = Some(Utc::now());
-        db.save(&config.state_file).ok();
+        db.dirty = true;
     }
 
     // ── 构建正则表达式（全局共享）────────────────────────────────────────────

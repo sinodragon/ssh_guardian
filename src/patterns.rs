@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-// 单条历史失败记录
 pub struct PatternConfig {
     pub ip_group: usize,
     pub user_group: Option<usize>,
@@ -99,6 +98,7 @@ pub struct FailedLogin {
     pub port: Option<u16>,
 }
 
+// 单条历史失败记录
 #[derive(Serialize, Deserialize)]
 pub struct HistoryFailRecord {
     pub ip: String,

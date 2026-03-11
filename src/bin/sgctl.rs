@@ -1,9 +1,9 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use ssh_guardian::ipc::{Command, Response, SOCKET_PATH};
+use ssh_guardian::patterns::HistoryFailRecord;
 use ssh_guardian::state::IpRecord;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use ssh_guardian::patterns::HistoryFailRecord;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -79,16 +79,9 @@ fn print_scan_history(
     to: Option<DateTime<Utc>>,
     records: &Vec<HistoryFailRecord>,
 ) {
-    let from_str = from
-        .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
-        .unwrap_or_else(|| "未知".to_string());
-    let to_str = to
-        .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
-        .unwrap_or_else(|| "未知".to_string());
-
     println!("════════════════════════════════════════════");
     println!("  历史扫描结果");
-    println!("  扫描范围: {} → {}", from_str, to_str);
+    println!("  扫描范围: {} → {}", fmt_time_opt(from), fmt_time_opt(to));
     println!("  发现 {} 个IP有失败记录", records.len());
     println!("────────────────────────────────────────────");
 
@@ -105,8 +98,8 @@ fn print_scan_history(
                 "  {:<18} {:>6}  {}  {}  {}",
                 r.ip,
                 r.fail_count,
-                r.first_seen.format("%Y-%m-%d %H:%M:%S"),
-                r.last_seen.format("%Y-%m-%d %H:%M:%S"),
+                fmt_time(r.first_seen),
+                fmt_time(r.last_seen),
                 r.users.join(", "),
             );
         }
@@ -136,9 +129,20 @@ fn print_banned_list(banned: &Vec<IpRecord>) {
             println!(
                 "  {} 到期: {} (累计{}次)",
                 r.ip,
-                until.format("%Y-%m-%d %H:%M:%S"),
+                fmt_time(until),
                 r.ban_count
             );
         }
     }
+}
+
+// 定义一个辅助函数统一处理转换
+fn fmt_time(t: DateTime<Utc>) -> String {
+    t.with_timezone(&Local)
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string()
+}
+
+fn fmt_time_opt(t: Option<DateTime<Utc>>) -> String {
+    t.map(|t| fmt_time(t)).unwrap_or_else(|| "未知".to_string())
 }

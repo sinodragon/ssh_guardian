@@ -10,7 +10,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 pub const SOCKET_PATH: &str = "/var/run/ssh_guardian.sock";
 
@@ -21,6 +21,12 @@ struct IpcContext<'a> {
     config: &'a Config,
     patterns: &'a [Regex],
     pattern_configs: &'a [PatternConfig],
+    ctrl_tx: &'a mpsc::Sender<ControlMsg>,
+}
+
+#[derive(Debug)]
+pub enum ControlMsg {
+    Stop,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -32,6 +38,7 @@ pub enum Command {
     Ban { ip: String },
     AddWhitelist { ip: String },
     ScanHistory,
+    Stop,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -68,6 +75,7 @@ pub fn listen(
     config: Config,
     patterns: Arc<Vec<Regex>>,
     pattern_configs: Arc<Vec<PatternConfig>>,
+    ctrl_tx: mpsc::Sender<ControlMsg>,
 ) {
     let _ = fs::remove_file(SOCKET_PATH);
 
@@ -95,6 +103,7 @@ pub fn listen(
         config: &config,
         patterns: &patterns,
         pattern_configs: &pattern_configs,
+        ctrl_tx: &ctrl_tx,
     };
 
     for stream in listener.incoming() {
@@ -235,6 +244,17 @@ fn handle_command(cmd: Command, ctx: &IpcContext) -> Response {
             ));
 
             Response::HistoryScan { from, to, records }
+        }
+
+        Command::Stop => {
+            ctx.logger
+                .lock()
+                .unwrap()
+                .info("sgctl 请求停止服务，正在关闭...");
+            ctx.ctrl_tx.send(ControlMsg::Stop).ok();
+            Response::Ok {
+                message: "服务正在关闭...".to_string(),
+            }
         }
     }
 }

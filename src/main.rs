@@ -14,36 +14,48 @@ mod state;
 use ban_manager::BanManager;
 use chrono::Utc;
 use config::Config;
+use ipc::ControlMsg;
 use log_watcher::LogWatcher;
 use logger::GuardianLogger;
 #[cfg(unix)]
 use nix::sys::signal::{self, SigHandler, Signal};
 use state::StateDb;
-use std::sync::{Arc, Mutex};
+#[cfg(unix)]
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread;
 use std::time::Duration;
 
+// 将 ctrl_tx 存入全局，供信号处理函数使用
+static CTRL_TX: OnceLock<mpsc::Sender<ControlMsg>> = OnceLock::new();
+
 #[cfg(unix)]
-static mut RUNNING: bool = true;
+static RUNNING: AtomicBool = AtomicBool::new(true);
 
 #[cfg(unix)]
 extern "C" fn handle_signal(_: libc::c_int) {
-    unsafe {
-        RUNNING = false;
+    RUNNING.store(false, Ordering::SeqCst);
+    // 发送停止消息给主线程，触发立即退出
+    if let Some(tx) = CTRL_TX.get() {
+        tx.send(ControlMsg::Stop).ok();
     }
 }
 
 #[cfg(unix)]
-static mut RELOAD_LOG: bool = false;
+static RELOAD_LOG: AtomicBool = AtomicBool::new(false);
 
 #[cfg(unix)]
 extern "C" fn handle_sighup(_: libc::c_int) {
-    unsafe {
-        RELOAD_LOG = true;
-    }
+    RELOAD_LOG.store(true, Ordering::SeqCst);
 }
 
 fn main() {
+    // ── 创建控制 channel ──────────────────────────────────────────────────────
+    let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControlMsg>();
+
+    // 将 sender 存入全局，供信号处理函数使用
+    CTRL_TX.set(ctrl_tx.clone()).ok();
+
     // ── 注册信号处理 ──────────────────────────────────────────────────────────
     #[cfg(unix)]
     unsafe {
@@ -135,6 +147,7 @@ fn main() {
         let ipc_config = config.clone();
         let ipc_pattern = Arc::clone(&patterns);
         let ipc_pattern_configs = Arc::clone(&pattern_configs);
+        let ipc_ctrl_tx = ctrl_tx.clone();
         thread::spawn(move || {
             ipc::listen(
                 ipc_ban_manager,
@@ -143,6 +156,7 @@ fn main() {
                 ipc_config,
                 ipc_pattern,
                 ipc_pattern_configs,
+                ipc_ctrl_tx,
             );
         })
     };
@@ -155,17 +169,9 @@ fn main() {
     let mut last_event_cleanup = std::time::Instant::now();
     let mut last_record_cleanup = std::time::Instant::now();
 
-    loop {
+    'main: loop {
         #[cfg(unix)]
-        if unsafe { !RUNNING } {
-            break;
-        }
-
-        #[cfg(unix)]
-        if unsafe { RELOAD_LOG } {
-            unsafe {
-                RELOAD_LOG = false;
-            }
+        if RELOAD_LOG.swap(false, Ordering::SeqCst) {
             match GuardianLogger::new(&config.log_file) {
                 Ok(new_logger) => {
                     let mut logger = glog.lock().unwrap();
@@ -177,13 +183,10 @@ fn main() {
         }
 
         // 到期解禁检查
-        {
-            let mut bm = ban_manager.lock().unwrap();
-            bm.check_expired_bans();
-        }
+        ban_manager.lock().unwrap().check_expired_bans();
 
+        // 清理 fail_events
         if last_event_cleanup.elapsed().as_secs() >= config.event_cleanup_interval_secs {
-            // 清理 fail_events
             let mut db = state_db.lock().unwrap();
             let cleaned = db.cleanup_expired_events(config.time_window_secs);
             glog.lock().unwrap().info(&format!(
@@ -194,8 +197,8 @@ fn main() {
             last_event_cleanup = std::time::Instant::now();
         }
 
+        // 清理 records
         if last_record_cleanup.elapsed().as_secs() >= config.record_cleanup_interval_secs {
-            // 清理 records
             let mut db = state_db.lock().unwrap();
             let cleaned = db.cleanup_inactive_records(config.record_retain_days);
             glog.lock().unwrap().info(&format!(
@@ -219,13 +222,26 @@ fn main() {
             }
         }
 
-        // 每60秒检查一次
-        for _ in 0..60 {
-            #[cfg(unix)]
-            if unsafe { !RUNNING || RELOAD_LOG } {
-                break;
-            }
-            thread::sleep(Duration::from_secs(1));
+        // 等待下次执行或收到控制消息，替换原来的 for _ in 0..60 轮询
+        match ctrl_rx.recv_timeout(Duration::from_secs(60)) {
+            Ok(ControlMsg::Stop) => {
+                glog.lock().unwrap().info("收到停止指令，正在退出...");
+                break 'main;
+            },
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // 正常超时，继续下一轮
+            },
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                // 所有 sender 都已释放，属于异常情况
+                glog.lock().unwrap().error("控制 channel 意外断开，程序退出");
+                break 'main;
+            },
+        }
+
+        // 检查 OS 信号（在 recv_timeout 返回后检查，响应及时）
+        #[cfg(unix)]
+        if !RUNNING.load(Ordering::SeqCst) {
+            break 'main;
         }
     }
 

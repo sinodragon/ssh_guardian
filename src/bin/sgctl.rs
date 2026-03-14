@@ -27,6 +27,7 @@ fn main() {
             Command::Ban { ip: ip.clone() }
         }
         Some("scan") => Command::ScanHistory,
+        Some("stop") => Command::Stop,
         _ => {
             eprintln!("用法:");
             eprintln!("  sgctl status          查看全部状态");
@@ -35,6 +36,7 @@ fn main() {
             eprintln!("  sgctl unban <IP>      手动解禁");
             eprintln!("  sgctl ban   <IP>      手动封禁");
             eprintln!("  sgctl scan            扫描历史记录");
+            eprintln!("  sgctl stop            停止守护进程");
             std::process::exit(1);
         }
     };

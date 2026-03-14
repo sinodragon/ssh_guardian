@@ -22,12 +22,9 @@ use nix::sys::signal::{self, SigHandler, Signal};
 use state::StateDb;
 #[cfg(unix)]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
-
-// 将 ctrl_tx 存入全局，供信号处理函数使用
-static CTRL_TX: OnceLock<mpsc::Sender<ControlMsg>> = OnceLock::new();
 
 #[cfg(unix)]
 static RUNNING: AtomicBool = AtomicBool::new(true);
@@ -35,10 +32,6 @@ static RUNNING: AtomicBool = AtomicBool::new(true);
 #[cfg(unix)]
 extern "C" fn handle_signal(_: libc::c_int) {
     RUNNING.store(false, Ordering::SeqCst);
-    // 发送停止消息给主线程，触发立即退出
-    if let Some(tx) = CTRL_TX.get() {
-        tx.send(ControlMsg::Stop).ok();
-    }
 }
 
 #[cfg(unix)]
@@ -52,9 +45,6 @@ extern "C" fn handle_sighup(_: libc::c_int) {
 fn main() {
     // ── 创建控制 channel ──────────────────────────────────────────────────────
     let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControlMsg>();
-
-    // 将 sender 存入全局，供信号处理函数使用
-    CTRL_TX.set(ctrl_tx.clone()).ok();
 
     // ── 注册信号处理 ──────────────────────────────────────────────────────────
     #[cfg(unix)]
@@ -168,8 +158,33 @@ fn main() {
 
     let mut last_event_cleanup = std::time::Instant::now();
     let mut last_record_cleanup = std::time::Instant::now();
+    let mut tick = 0u32;
 
     'main: loop {
+        //
+        match ctrl_rx.recv_timeout(Duration::from_secs(1)) {
+            Ok(ControlMsg::Stop) => {
+                glog.lock().unwrap().info("收到停止指令，正在退出...");
+                break 'main;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // 正常超时，继续下一轮
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                // 所有 sender 都已释放，属于异常情况
+                glog.lock()
+                    .unwrap()
+                    .error("控制 channel 意外断开，程序退出");
+                break 'main;
+            }
+        }
+
+        // 检查 OS 信号，最长等待1秒，确保能及时响应退出信号
+        #[cfg(unix)]
+        if !RUNNING.load(Ordering::SeqCst) {
+            break 'main;
+        }
+
         #[cfg(unix)]
         if RELOAD_LOG.swap(false, Ordering::SeqCst) {
             match GuardianLogger::new(&config.log_file) {
@@ -182,6 +197,14 @@ fn main() {
             }
         }
 
+        // 累计到60秒执行一次定时任务
+        tick += 1;
+        if tick < 60 {
+            continue;
+        }
+        tick = 0;
+
+        // ── 以下为周期性任务（每60秒执行一次）────────────────────────────────
         // 到期解禁检查
         ban_manager.lock().unwrap().check_expired_bans();
 
@@ -220,28 +243,6 @@ fn main() {
                     db.dirty = false;
                 }
             }
-        }
-
-        // 等待下次执行或收到控制消息，替换原来的 for _ in 0..60 轮询
-        match ctrl_rx.recv_timeout(Duration::from_secs(60)) {
-            Ok(ControlMsg::Stop) => {
-                glog.lock().unwrap().info("收到停止指令，正在退出...");
-                break 'main;
-            },
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                // 正常超时，继续下一轮
-            },
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                // 所有 sender 都已释放，属于异常情况
-                glog.lock().unwrap().error("控制 channel 意外断开，程序退出");
-                break 'main;
-            },
-        }
-
-        // 检查 OS 信号（在 recv_timeout 返回后检查，响应及时）
-        #[cfg(unix)]
-        if !RUNNING.load(Ordering::SeqCst) {
-            break 'main;
         }
     }
 

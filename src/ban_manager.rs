@@ -37,26 +37,30 @@ impl BanManager {
             return;
         }
 
-        let fail_count = {
+        let (fail_count, total_fails) = {
             let mut db = self.state_db.lock().unwrap();
             // 1. 添加失败事件
             db.add_fail_event(ip, user, port);
-            // 2. 统计窗口内失败次数
-            db.fail_count_in_window(ip, self.config.time_window_secs)
+            // 2. 统计失败次数
+            let fail_count = db.fail_count_in_window(ip, self.config.time_window_secs);
+            let total_fails = db.records.get(ip).map(|r| r.total_fails).unwrap_or(0);
+            (fail_count, total_fails)
         };
 
         // 3. 记录日志
         {
             let mut log = self.logger.lock().unwrap();
-            log.fail_detected(ip, user, fail_count, self.config.fail_threshold);
+            log.fail_detected(
+                ip,
+                user,
+                fail_count,
+                self.config.fail_threshold,
+                total_fails,
+                self.config.total_fail_threshold,
+            );
         }
 
-        // 4. 未达阈值，不处理
-        if fail_count <= self.config.fail_threshold {
-            return;
-        }
-
-        // 5. 判断是否已在封禁中
+        // 4. 判断是否已在封禁中
         if self.is_ip_banned(ip) {
             // 封禁期间再次触发，仅记录，不重置计时
             let mut log = self.logger.lock().unwrap();
@@ -65,6 +69,29 @@ impl BanManager {
                 ip, fail_count
             ));
             return;
+        }
+
+        // 5. 设置封禁触发条件
+        let trigger_window = fail_count > self.config.fail_threshold;
+        let trigger_total = total_fails >= self.config.total_fail_threshold;
+        if !trigger_window && !trigger_total {
+            return;
+        }
+
+        // 记录封禁原因
+        {
+            let mut log = self.logger.lock().unwrap();
+            if trigger_window {
+                log.info(&format!(
+                    "IP={} 触发窗口封禁（窗口内失败 {} 次）",
+                    ip, fail_count
+                ));
+            } else {
+                log.info(&format!(
+                    "IP={} 触发累计封禁（总失败 {} 次）",
+                    ip, total_fails
+                ));
+            }
         }
 
         // 6. 计算新封禁参数

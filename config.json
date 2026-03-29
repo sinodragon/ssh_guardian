@@ -14,5 +14,6 @@
   ],
   "event_cleanup_interval_secs": 3600,
   "record_cleanup_interval_secs": 86400,
-  "record_retain_days": 90
+  "record_retain_days": 90,
+  "total_fail_threshold": 20
 }

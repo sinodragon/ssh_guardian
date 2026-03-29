@@ -23,9 +23,14 @@ pub struct Config {
     pub log_file: String,
     /// 白名单 IP 列表（不会被封禁）
     pub whitelist: Vec<String>,
-    pub event_cleanup_interval_secs: u64, // fail_events 清理间隔
-    pub record_cleanup_interval_secs: u64, // records 清理间隔
-    pub record_retain_days: i64,          // 非永久封禁记录保留天数
+    /// fail_events 清理间隔
+    pub event_cleanup_interval_secs: u64,
+    /// records 清理间隔
+    pub record_cleanup_interval_secs: u64,
+    /// 非永久封禁记录保留天数
+    pub record_retain_days: i64,
+    /// 累计失败次数阈值
+    pub total_fail_threshold: u32,
 }
 
 impl Default for Config {
@@ -43,6 +48,7 @@ impl Default for Config {
             event_cleanup_interval_secs: 3600,
             record_cleanup_interval_secs: 86400,
             record_retain_days: 90,
+            total_fail_threshold: 20,
         }
     }
 }

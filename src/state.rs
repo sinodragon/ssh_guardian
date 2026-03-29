@@ -92,6 +92,8 @@ pub struct IpRecord {
     pub last_banned: Option<DateTime<Utc>>,
     /// 最近一次触发封禁时统计到的失败次数
     pub last_fail_count: u32,
+    /// 历史总失败次数
+    pub total_fails: u32,
 }
 
 impl IpRecord {
@@ -104,6 +106,7 @@ impl IpRecord {
             first_seen: Utc::now(),
             last_banned: None,
             last_fail_count: 0,
+            total_fails: 0,
         }
     }
 
@@ -200,6 +203,13 @@ impl StateDb {
             user: user.to_string(),
             port,
         });
+
+        let record = self
+            .records
+            .entry(ip.to_string())
+            .or_insert_with(|| IpRecord::new(ip));
+        record.total_fails += 1;
+
         self.dirty = true;
     }
 

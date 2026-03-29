@@ -139,7 +139,7 @@ fn handle_command(cmd: Command, ctx: &IpcContext) -> Response {
             let banned = db
                 .records
                 .values()
-                .filter(|r| r.is_currently_banned())
+                .filter(|r| r.is_active_ban())
                 .cloned()
                 .collect();
             let tracked = db
@@ -159,7 +159,7 @@ fn handle_command(cmd: Command, ctx: &IpcContext) -> Response {
             let records = db
                 .records
                 .values()
-                .filter(|r| r.is_currently_banned())
+                .filter(|r| r.is_active_ban())
                 .cloned()
                 .collect();
             Response::Banned { records }

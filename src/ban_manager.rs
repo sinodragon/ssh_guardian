@@ -86,16 +86,7 @@ impl BanManager {
     pub fn check_expired_bans(&mut self) {
         let expired: Vec<IpRecord> = {
             let db = self.state_db.lock().unwrap();
-            db.active_temp_bans()
-                .into_iter()
-                .filter(|r| {
-                    if let Some(until) = r.ban_until {
-                        Utc::now() >= until
-                    } else {
-                        false
-                    }
-                })
-                .collect()
+            db.expired_temp_bans()
         };
 
         for record in expired {
@@ -110,7 +101,7 @@ impl BanManager {
         let db = self.state_db.lock().unwrap();
         db.records
             .get(ip)
-            .map(|r| r.is_currently_banned())
+            .map(|r| r.is_active_ban())
             .unwrap_or(false)
     }
 
@@ -255,7 +246,7 @@ impl BanManager {
         let ban_count = {
             let db = self.state_db.lock().unwrap();
             match db.records.get(ip) {
-                Some(r) if r.is_currently_banned() => r.ban_count,
+                Some(r) if r.is_active_ban() => r.ban_count,
                 Some(_) => return Err(format!("IP={} 当前未处于封禁状态", ip)),
                 None => return Err(format!("IP={} 没有封禁记录", ip)),
             }

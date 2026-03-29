@@ -37,7 +37,7 @@ impl IpRecord {
     }
 
     /// 判断当前是否处于封禁状态
-    pub fn is_currently_banned(&self) -> bool {
+    pub fn is_active_ban(&self) -> bool {
         if self.permanent {
             return true;
         }
@@ -152,10 +152,10 @@ impl StateDb {
     }
 
     /// 获取所有当前临时封禁中的记录（用于到期检查）
-    pub fn active_temp_bans(&self) -> Vec<IpRecord> {
+    pub fn expired_temp_bans(&self) -> Vec<IpRecord> {
         self.records
             .values()
-            .filter(|r| !r.permanent && r.ban_until.is_some() && r.is_currently_banned())
+            .filter(|r| r.ban_until.is_some() && !r.is_active_ban())
             .cloned()
             .collect()
     }
@@ -190,7 +190,7 @@ impl StateDb {
                 return true;
             }
             // 当前仍在封禁中，保留
-            if record.is_currently_banned() {
+            if record.is_active_ban() {
                 return true;
             }
             // 最近有过封禁行为且未超过保留期，保留

@@ -5,6 +5,74 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+mod serialize_as_local {
+    use chrono::{DateTime, Local, Utc};
+    use serde::{self, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(dt: &DateTime<Utc>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let local_dt = dt
+            .with_timezone(&Local)
+            .format("%Y-%m-%d %H:%M:%S %z")
+            .to_string();
+        s.serialize_str(&local_dt)
+    }
+
+    pub fn deserialize<'de, D>(d: D) -> Result<DateTime<Utc>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(d)?;
+        if let Ok(dt) = DateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S %z") {
+            return Ok(dt.with_timezone(&Utc));
+        }
+        DateTime::parse_from_rfc3339(&s)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+mod serialize_opt_as_local {
+    use chrono::{DateTime, Local, Utc};
+    use serde::{self, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(dt: &Option<DateTime<Utc>>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match dt {
+            Some(dt) => {
+                let local_dt = dt
+                    .with_timezone(&Local)
+                    .format("%Y-%m-%d %H:%M:%S %z")
+                    .to_string();
+                s.serialize_some(&local_dt)
+            }
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(d: D) -> Result<Option<DateTime<Utc>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let opt: Option<String> = Option::deserialize(d)?;
+        match opt {
+            Some(s) => {
+                if let Ok(dt) = DateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S %z") {
+                    return Ok(Some(dt.with_timezone(&Utc)));
+                }
+                DateTime::parse_from_rfc3339(&s)
+                    .map(|dt| Some(dt.with_timezone(&Utc)))
+                    .map_err(serde::de::Error::custom)
+            }
+            None => Ok(None),
+        }
+    }
+}
+
 /// 单个 IP 的封禁记录
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IpRecord {
@@ -12,12 +80,15 @@ pub struct IpRecord {
     /// 累计封禁次数
     pub ban_count: u32,
     /// 当前封禁到期时间；None 表示当前未被封禁（或永久封禁）
+    #[serde(with = "serialize_opt_as_local")]
     pub ban_until: Option<DateTime<Utc>>,
     /// 是否永久封禁
     pub permanent: bool,
     /// 首次检测时间
+    #[serde(with = "serialize_as_local")]
     pub first_seen: DateTime<Utc>,
     /// 最近一次封禁时间
+    #[serde(with = "serialize_opt_as_local")]
     pub last_banned: Option<DateTime<Utc>>,
     /// 最近一次触发封禁时统计到的失败次数
     pub last_fail_count: u32,
@@ -66,6 +137,7 @@ impl IpRecord {
 /// 失败登录事件（用于时间窗口统计）
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FailEvent {
+    #[serde(with = "serialize_as_local")]
     pub time: DateTime<Utc>,
     pub user: String,
     pub port: Option<u16>,
@@ -78,7 +150,9 @@ pub struct StateDb {
     pub records: HashMap<String, IpRecord>,
     /// IP -> 最近失败事件列表（用于时间窗口统计）
     pub fail_events: HashMap<String, Vec<FailEvent>>,
+    #[serde(with = "serialize_opt_as_local")]
     pub last_shutdown: Option<DateTime<Utc>>,
+    #[serde(with = "serialize_opt_as_local")]
     pub start_time: Option<DateTime<Utc>>,
     #[serde(skip)]
     pub dirty: bool,

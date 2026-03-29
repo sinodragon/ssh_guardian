@@ -31,6 +31,10 @@ pub struct Config {
     pub record_retain_days: i64,
     /// 累计失败次数阈值
     pub total_fail_threshold: u32,
+    pub high_threat_score: u32,
+    pub low_thread_score: u32,
+    pub burst_threshold_secs: u64,
+    pub attack_user_threshold: u32,
 }
 
 impl Default for Config {
@@ -48,7 +52,11 @@ impl Default for Config {
             event_cleanup_interval_secs: 3600,
             record_cleanup_interval_secs: 86400,
             record_retain_days: 90,
-            total_fail_threshold: 20,
+            total_fail_threshold: 30,
+            high_threat_score: 80,
+            low_thread_score: 40,
+            burst_threshold_secs: 5,
+            attack_user_threshold: 5,
         }
     }
 }

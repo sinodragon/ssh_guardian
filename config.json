@@ -15,5 +15,9 @@
   "event_cleanup_interval_secs": 3600,
   "record_cleanup_interval_secs": 86400,
   "record_retain_days": 90,
-  "total_fail_threshold": 20
+  "total_fail_threshold": 20,
+  "high_threat_score": 80,
+  "low_thread_score": 40,
+  "burst_threshold_secs": 5,
+  "attack_user_threshold": 5
 }

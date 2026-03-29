@@ -37,15 +37,18 @@ impl BanManager {
             return;
         }
 
-        let (fail_count, total_fails) = {
+        let (fail_count, total_fails, unique_users) = {
             let mut db = self.state_db.lock().unwrap();
             // 1. 添加失败事件
-            db.add_fail_event(ip, user, port);
+            db.add_fail_event(ip, user, port, self.config.burst_threshold_secs);
             // 2. 统计失败次数
             let fail_count = db.fail_count_in_window(ip, self.config.time_window_secs);
             let total_fails = db.records.get(ip).map(|r| r.total_fails).unwrap_or(0);
-            (fail_count, total_fails)
+            let unique_users = db.records.get(ip).map(|r| r.unique_users_tried).unwrap_or(0);
+            (fail_count, total_fails, unique_users)
         };
+
+        let threat_score = self.calc_threat_score(ip, fail_count);
 
         // 3. 记录日志
         {
@@ -72,35 +75,30 @@ impl BanManager {
         }
 
         // 5. 设置封禁触发条件
-        let trigger_window = fail_count > self.config.fail_threshold;
-        let trigger_total = total_fails >= self.config.total_fail_threshold;
-        if !trigger_window && !trigger_total {
+        let trigger = fail_count > self.config.fail_threshold
+            || threat_score >= self.config.high_threat_score
+            || (total_fails >= self.config.total_fail_threshold
+            && threat_score >= self.config.low_thread_score)
+            || (total_fails >= self.config.total_fail_threshold
+            && unique_users >= self.config.attack_user_threshold);
+        if !trigger {
             return;
         }
 
         // 记录封禁原因
         {
             let mut log = self.logger.lock().unwrap();
-            if trigger_window {
-                log.info(&format!(
-                    "IP={} 触发窗口封禁（窗口内失败 {} 次）",
-                    ip, fail_count
-                ));
-            } else {
-                log.info(&format!(
-                    "IP={} 触发累计封禁（总失败 {} 次）",
-                    ip, total_fails
-                ));
-            }
+            log.info(&format!(
+                "IP={} 触发封禁 | 窗口内失败={} | 总失败={} | 威胁评分={}",
+                ip, fail_count, total_fails,threat_score
+            ));
         }
 
-        // 6. 计算新封禁参数
+        // 6. 计算新封禁参数并执行封禁
         let (new_ban_count, duration_secs, permanent) = self.calc_ban_params(ip);
-
-        // 7. 执行封禁
         self.do_ban(ip, new_ban_count, duration_secs, permanent, fail_count);
 
-        // 8. 封禁后清除失败事件（避免重复计数）
+        // 7. 封禁后清除失败事件（避免重复计数）
         {
             let mut db = self.state_db.lock().unwrap();
             db.clear_fail_events(ip);
@@ -359,5 +357,36 @@ impl BanManager {
             }
             Err(_) => false,
         }
+    }
+
+    fn calc_threat_score(&self, ip: &str, fail_count: u32) -> u32 {
+        let db = self.state_db.lock().unwrap();
+        let record = match db.records.get(ip) {
+            Some(r) => r,
+            None => return 0,
+        };
+
+        let mut score = 0u32;
+
+        let window_ratio = fail_count as f32 / self.config.fail_threshold as f32;
+        score += (window_ratio * 40.0).min(40.0) as u32;
+
+        let user_score = match record.unique_users_tried {
+            0..=1 => 0,
+            2..=3 => 10,
+            4..=9 => 20,
+            _ => 30,
+        };
+        score += user_score;
+
+        let burst_score = match record.burst_count {
+            0 => 0,
+            1..=2 => 10,
+            3..=5 => 20,
+            _ => 30,
+        };
+        score += burst_score;
+
+        score.min(100)
     }
 }

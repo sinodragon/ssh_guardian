@@ -94,8 +94,8 @@ pub struct IpRecord {
     pub last_fail_count: u32,
     /// 历史总失败次数
     pub total_fails: u32,
-    /// 尝试过的用户名数量
-    pub unique_users_tried: u32,
+    /// 尝试过的用户名
+    pub tried_users: Vec<String>,
     /// 历史最短失败间隔（秒）
     pub min_fail_interval: Option<u64>,
     /// 上次失败时间
@@ -116,7 +116,7 @@ impl IpRecord {
             last_banned: None,
             last_fail_count: 0,
             total_fails: 0,
-            unique_users_tried: 0,
+            tried_users: Vec::new(),
             min_fail_interval: None,
             last_fail_time: None,
             burst_count: 0,
@@ -229,13 +229,8 @@ impl StateDb {
             .or_insert_with(|| IpRecord::new(ip));
         record.total_fails += 1;
 
-        let already_seen = self
-            .fail_events
-            .get(ip)
-            .map(|events| events.iter().any(|e| e.user == user))
-            .unwrap_or(false);
-        if !already_seen {
-            record.unique_users_tried += 1;
+        if !record.tried_users.contains(&user.to_string()) {
+            record.tried_users.push(user.to_string());
         }
 
         let now = Utc::now();

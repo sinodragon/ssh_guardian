@@ -44,7 +44,7 @@ impl BanManager {
             // 2. 统计失败次数
             let fail_count = db.fail_count_in_window(ip, self.config.time_window_secs);
             let total_fails = db.records.get(ip).map(|r| r.total_fails).unwrap_or(0);
-            let unique_users = db.records.get(ip).map(|r| r.unique_users_tried).unwrap_or(0);
+            let unique_users = db.records.get(ip).map(|r| r.tried_users.len() as u32).unwrap_or(0);
             (fail_count, total_fails, unique_users)
         };
 
@@ -371,7 +371,8 @@ impl BanManager {
         let window_ratio = fail_count as f32 / self.config.fail_threshold as f32;
         score += (window_ratio * 40.0).min(40.0) as u32;
 
-        let user_score = match record.unique_users_tried {
+        let unique_users = record.tried_users.len() as u32;
+        let user_score = match unique_users {
             0..=1 => 0,
             2..=3 => 10,
             4..=9 => 20,

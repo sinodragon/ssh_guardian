@@ -80,21 +80,21 @@ impl LogWatcher {
                     // 检查文件是否被日志轮转（inode 变化）
                     // 简单处理：每次 Ok(0) 时重新 open
                     let current_path = self.config.auth_log.clone();
-                    if let Ok(new_file) = File::open(&current_path) {
+                    if let Ok(latest_file) = File::open(&current_path) {
                         // 用新文件替换 reader
-                        let inner = reader.get_mut();
+                        let current_file = reader.get_ref();
                         // 检查新旧文件是否相同（通过 metadata）
                         #[cfg(unix)]
-                        if let (Ok(old_meta), Ok(new_meta)) =
-                            (inner.metadata(), new_file.metadata())
+                        if let (Ok(current_meta), Ok(latest_meta)) =
+                            (current_file.metadata(), latest_file.metadata())
                         {
                             use std::os::unix::fs::MetadataExt;
-                            if old_meta.ino() != new_meta.ino() {
+                            if current_meta.ino() != latest_meta.ino() {
                                 self.logger
                                     .lock()
                                     .unwrap()
                                     .info("检测到 auth.log 日志轮转，重新打开文件");
-                                reader = BufReader::new(new_file);
+                                reader = BufReader::new(latest_file);
                             }
                         }
                     }

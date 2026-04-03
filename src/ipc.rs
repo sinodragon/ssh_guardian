@@ -46,7 +46,7 @@ pub enum Response {
     Status {
         banned: Vec<IpRecord>,
         tracked: Vec<(String, usize)>,
-        total_records: usize,
+        records: Vec<IpRecord>,
     },
     Banned {
         records: Vec<IpRecord>,
@@ -150,7 +150,7 @@ fn handle_command(cmd: Command, ctx: &IpcContext) -> Response {
             Response::Status {
                 banned,
                 tracked,
-                total_records: db.records.len(),
+                records: db.records.values().cloned().collect(),
             }
         }
 

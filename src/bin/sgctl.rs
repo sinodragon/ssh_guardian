@@ -66,13 +66,11 @@ fn print_response(resp: Response) {
         Response::Status {
             banned,
             tracked,
-            total_records,
+            records,
         } => {
             print_banned_list(&banned);
             print_tracked_list(&tracked);
-            println!("───────────────────────────────────────");
-            println!("  历史记录共 {} 条", total_records);
-            println!("═══════════════════════════════════════");
+            print_record_list(&records);
         }
         Response::Banned { records } => print_banned_list(&records),
         Response::Tracked { records } => print_tracked_list(&records),
@@ -82,16 +80,62 @@ fn print_response(resp: Response) {
     }
 }
 
+static HEAD_LINE: &str = "═══════════════════════════════════════";
+static SEP_LINE: &str = "───────────────────────────────────────";
+fn print_record_list(records: &[IpRecord]) {
+    println!("{}", HEAD_LINE);
+    println!("  历史记录共 {} 条", records.len());
+    println!("{}", SEP_LINE);
+
+    for record in records {
+        let tried_users = record.tried_users.join(", ");
+        println!("  - IP: {}", record.ip);
+        println!(
+            "  - 累计次数: 失败 {} 次 / 封禁 {} 次",
+            record.total_fails, record.ban_count
+        );
+        println!("  - 失败用户: {}", tried_users);
+        println!("{}", SEP_LINE);
+    }
+}
+
+fn print_tracked_list(tracked: &[(String, usize)]) {
+    println!("{}", HEAD_LINE);
+    println!("  追踪中 ({} 个IP)", tracked.len());
+    println!("{}", SEP_LINE);
+    for (ip, count) in tracked {
+        println!("  {} 失败 {} 次", ip, count);
+    }
+}
+
+fn print_banned_list(banned: &[IpRecord]) {
+    println!("{}", HEAD_LINE);
+    println!("  封禁中 ({} 个IP)", banned.len());
+    println!("{}", SEP_LINE);
+    for r in banned {
+        if r.permanent {
+            println!("  {} 永久封禁 (累计{}次)", r.ip, r.ban_count);
+        } else if let Some(until) = r.ban_until {
+            println!(
+                "  {} 到期: {} (累计{}次)",
+                r.ip,
+                fmt_time(until),
+                r.ban_count
+            );
+        }
+    }
+}
+
 fn print_scan_history(
     from: Option<DateTime<Utc>>,
     to: Option<DateTime<Utc>>,
     records: &[HistoryFailRecord],
 ) {
-    println!("════════════════════════════════════════════");
+    println!("{}", HEAD_LINE);
     println!("  历史扫描结果");
     println!("  扫描范围: {} → {}", fmt_time_opt(from), fmt_time_opt(to));
     println!("  发现 {} 个IP有失败记录", records.len());
-    println!("────────────────────────────────────────────");
+    println!("{}", SEP_LINE);
 
     if records.is_empty() {
         println!("  （无失败记录）");
@@ -111,37 +155,10 @@ fn print_scan_history(
                 r.users.join(", "),
             );
         }
-        println!("────────────────────────────────────────────");
+        println!("{}", SEP_LINE);
         println!("  提示：使用 sgctl ban <IP> 手动封禁可疑IP");
     }
-    println!("════════════════════════════════════════════");
-}
-
-fn print_tracked_list(tracked: &[(String, usize)]) {
-    println!("═══════════════════════════════════════");
-    println!("  追踪中 ({} 个IP)", tracked.len());
-    println!("───────────────────────────────────────");
-    for (ip, count) in tracked {
-        println!("  {} 失败 {} 次", ip, count);
-    }
-}
-
-fn print_banned_list(banned: &[IpRecord]) {
-    println!("═══════════════════════════════════════");
-    println!("  封禁中 ({} 个IP)", banned.len());
-    println!("───────────────────────────────────────");
-    for r in banned {
-        if r.permanent {
-            println!("  {} 永久封禁 (累计{}次)", r.ip, r.ban_count);
-        } else if let Some(until) = r.ban_until {
-            println!(
-                "  {} 到期: {} (累计{}次)",
-                r.ip,
-                fmt_time(until),
-                r.ban_count
-            );
-        }
-    }
+    println!("{}", HEAD_LINE);
 }
 
 // 定义一个辅助函数统一处理转换

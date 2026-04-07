@@ -277,6 +277,14 @@ impl StateDb {
         self.dirty = true;
     }
 
+    pub fn delete_record(&mut self, ip: &str) -> Result<IpRecord, String> {
+        let deleted = self.records
+            .remove(ip)
+            .ok_or(format!("IP not found: {}", ip))?;
+        self.dirty = true;
+        Ok(deleted)
+    }
+
     /// 获取所有当前临时封禁中的记录（用于到期检查）
     pub fn expired_temp_bans(&self) -> Vec<IpRecord> {
         self.records

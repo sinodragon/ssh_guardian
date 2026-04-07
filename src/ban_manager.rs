@@ -388,6 +388,14 @@ impl BanManager {
         };
         score += burst_score;
 
+        let banned_score = match record.ban_count {
+            0 => 0,
+            1..=2 => 20,
+            3..=5 => 40,
+            _ => 50,
+        };
+        score += banned_score;
+
         score.min(100)
     }
 }

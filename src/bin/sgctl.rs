@@ -26,6 +26,13 @@ fn main() {
             });
             Command::Ban { ip: ip.clone() }
         }
+        Some("delete") => {
+            let ip = args.get(2).unwrap_or_else(|| {
+                eprintln!("用法: sgctl delete <IP>");
+                std::process::exit(1);
+            });
+            Command::Delete { ip: ip.clone() }
+        }
         Some("scan") => Command::ScanHistory,
         Some("stop") => Command::Stop,
         _ => {
@@ -35,6 +42,7 @@ fn main() {
             eprintln!("  sgctl tracked         列出追踪中的IP");
             eprintln!("  sgctl unban <IP>      手动解禁");
             eprintln!("  sgctl ban   <IP>      手动封禁");
+            eprintln!("  sgctl delete <IP>     删除记录");
             eprintln!("  sgctl scan            扫描历史记录");
             eprintln!("  sgctl stop            停止守护进程");
             std::process::exit(1);

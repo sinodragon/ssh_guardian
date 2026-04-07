@@ -10,7 +10,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{mpsc, Arc, Mutex};
 
 pub const SOCKET_PATH: &str = "/var/run/ssh_guardian.sock";
 
@@ -36,6 +36,7 @@ pub enum Command {
     ListTracked,
     Unban { ip: String },
     Ban { ip: String },
+    Delete { ip: String },
     AddWhitelist { ip: String },
     ScanHistory,
     Stop,
@@ -201,6 +202,22 @@ fn handle_command(cmd: Command, ctx: &IpcContext) -> Response {
                         .info(&format!("sgctl 手动封禁 IP={}", ip));
                     Response::Ok {
                         message: format!("已封禁 {}", ip),
+                    }
+                }
+                Err(e) => Response::Err { message: e },
+            }
+        }
+
+        Command::Delete { ip } => {
+            let result = ctx.state_db.lock().unwrap().delete_record(&ip);
+            match result {
+                Ok(record) => {
+                    ctx.logger
+                        .lock()
+                        .unwrap()
+                        .info(&format!("sgctl 删除记录 IP={}", record.ip));
+                    Response::Ok {
+                        message: format!("已删除 {}", record.ip),
                     }
                 }
                 Err(e) => Response::Err { message: e },

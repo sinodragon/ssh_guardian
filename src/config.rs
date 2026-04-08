@@ -28,7 +28,7 @@ pub struct Config {
     /// records 清理间隔
     pub record_cleanup_interval_secs: u64,
     /// 非永久封禁记录保留天数
-    pub record_retain_days: i64,
+    pub record_retain_days: u16,
     /// 累计失败次数阈值
     pub total_fail_threshold: u32,
     pub high_threat_score: u32,

@@ -38,6 +38,7 @@ pub enum Command {
     Ban { ip: String },
     Delete { ip: String },
     AddWhitelist { ip: String },
+    Clear { days: u16 },
     ScanHistory,
     Stop,
 }
@@ -236,6 +237,17 @@ fn handle_command(cmd: Command, ctx: &IpcContext) -> Response {
                     "请手动将 {} 添加到 /etc/ssh_guardian/config.json 的 whitelist 字段，重启服务后生效",
                     ip
                 ),
+            }
+        }
+
+        Command::Clear { days } => {
+            let cleared = ctx.state_db.lock().unwrap().cleanup_inactive_records(days);
+            ctx.logger
+                .lock()
+                .unwrap()
+                .info(&format!("sgctl 清理历史记录 {} 条", cleared));
+            Response::Ok {
+                message: format!("已清理历史记录 {} 条", cleared),
             }
         }
 

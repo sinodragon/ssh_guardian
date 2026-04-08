@@ -314,8 +314,8 @@ impl StateDb {
     }
 
     /// 清理长期未活跃的历史记录（非永久封禁、已解禁、且超过保留期）
-    pub fn cleanup_inactive_records(&mut self, retain_days: i64) -> usize {
-        let cutoff = Utc::now() - chrono::Duration::days(retain_days);
+    pub fn cleanup_inactive_records(&mut self, retain_days: u16) -> usize {
+        let cutoff = Utc::now() - chrono::Duration::days(retain_days as i64);
         let before = self.records.len();
 
         self.records.retain(|_ip, record| {

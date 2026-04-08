@@ -33,6 +33,15 @@ fn main() {
             });
             Command::Delete { ip: ip.clone() }
         }
+        Some("clear") => {
+            let days = args.get(2)
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or_else(|| {
+                    eprintln!("用法: sgctl clear <N>, N 为整数");
+                    std::process::exit(1);
+                });
+            Command::Clear { days }
+        }
         Some("scan") => Command::ScanHistory,
         Some("stop") => Command::Stop,
         _ => {
@@ -43,6 +52,7 @@ fn main() {
             eprintln!("  sgctl unban <IP>      手动解禁");
             eprintln!("  sgctl ban   <IP>      手动封禁");
             eprintln!("  sgctl delete <IP>     删除记录");
+            eprintln!("  sgctl clear <N>       清理 N 天前的记录");
             eprintln!("  sgctl scan            扫描历史记录");
             eprintln!("  sgctl stop            停止守护进程");
             std::process::exit(1);
